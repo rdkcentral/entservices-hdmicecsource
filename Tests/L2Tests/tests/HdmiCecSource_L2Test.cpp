@@ -428,44 +428,72 @@ HdmiCecSource_L2Test::HdmiCecSource_L2Test()
                 }
             }));
 
-    EXPECT_CALL(*p_mfrMock, mfrSetTempThresholds(::testing::_, ::testing::_))
-        .WillRepeatedly(::testing::Invoke(
+    ON_CALL(*p_mfrMock, mfrSetTempThresholds(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
             [](int high, int critical) {
                 return mfrERR_NONE;
             }));
 
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetPowerState(::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [](PWRMgr_PowerState_t powerState) {
+                return PWRMGR_SUCCESS;
+            }));
+
+    ON_CALL(*p_mfrMock, mfrGetTemperature(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [&](mfrTemperatureState_t* curState, int* curTemperature, int* wifiTemperature) {
+                *curTemperature = 90;
+                *curState = (mfrTemperatureState_t)0;
+                *wifiTemperature = 25;
+                return mfrERR_NONE;
+            }));
+
+    ON_CALL(*p_connectionMock, open())
+        .WillByDefault(::testing::Return());
+
+    ON_CALL(*p_connectionMock, poll(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [&](const LogicalAddress& from, const Throw_e& doThrow) {
+                throw CECNoAckException();
+            }));
+
+    EXPECT_CALL(*p_libCCECMock, getPhysicalAddress(::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [&](uint32_t* physAddress) {
+                *physAddress = (uint32_t)0x12345678;
+            }));
+
     /* Activate plugin in constructor */
     uint32_t status = ActivateService("org.rdk.PowerManager");
-    if (status != Core::ERROR_NONE) {
-        TEST_LOG("Failed to activate PowerManager, status: %d", status);
-    }
+    EXPECT_EQ(Core::ERROR_NONE, status);
 
     status = ActivateService("org.rdk.HdmiCecSource");
-    if (status != Core::ERROR_NONE) {
-        TEST_LOG("Failed to activate HdmiCecSource, status: %d", status);
-    }
+    EXPECT_EQ(Core::ERROR_NONE, status);
 }
 
 HdmiCecSource_L2Test::~HdmiCecSource_L2Test()
 {
     TEST_LOG("HdmiCecSource_L2Test Destructor");
+    uint32_t status = Core::ERROR_GENERAL;
 
     ON_CALL(*p_connectionMock, close())
         .WillByDefault(::testing::Return());
 
-    ON_CALL(*p_powerManagerHalMock, PLAT_TERM())
-        .WillByDefault(::testing::Return(PWRMGR_SUCCESS));
+    sleep(5);
 
-    ON_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
-        .WillByDefault(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+    // Deactivate services in reverse order
+    status = DeactivateService("org.rdk.HdmiCecSource");
+    EXPECT_EQ(Core::ERROR_NONE, status);
 
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
+        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
 
-    DeactivateService("org.rdk.HdmiCecSource");
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
+        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
 
-
-    DeactivateService("org.rdk.PowerManager");
-
-    
+    status = DeactivateService("org.rdk.PowerManager");
+    EXPECT_EQ(Core::ERROR_NONE, status);
 
     if (HdmiCecSource_Client.IsValid()) {
         HdmiCecSource_Client.Release();
