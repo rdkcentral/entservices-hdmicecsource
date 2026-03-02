@@ -29,7 +29,7 @@ endif()
 if(SRC_FILES)
     find_package(${NAMESPACE}Plugins REQUIRED)
 
-    add_library(${MODULE_NAME} SHARED ${SRC_FILES})ES})
+    add_library(${MODULE_NAME} SHARED ${SRC_FILES})
 
     set_target_properties(${MODULE_NAME} PROPERTIES
             CXX_STANDARD 14
