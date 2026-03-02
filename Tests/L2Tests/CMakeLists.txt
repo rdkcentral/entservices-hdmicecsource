@@ -59,7 +59,9 @@ if(SRC_FILES)
         target_link_libraries(${MODULE_NAME} PRIVATE ${MOCKACCESSOR_LIBRARIES})
     else (MOCKACCESSOR_LIBRARIES)
          message ("Require ${MOCKACCESSOR_LIBRARIES} library")
-    endif (MOCKACCESSOR_LIBRARIES)    target_include_directories(
+    endif (MOCKACCESSOR_LIBRARIES)
+
+    target_include_directories(
         ${MODULE_NAME} PRIVATE ./
         ../../helpers
         ../../../entservices-testframework/Tests/mocks
