@@ -22,6 +22,10 @@ set(THUNDER_PORT 9998)
 
 set(SRC_FILES )
 
+if(PLUGIN_HDMICECSINK)
+    set(SRC_FILES ${SRC_FILES} tests/HdmiCecSink_L2Test.cpp)
+endif()
+
 if(SRC_FILES)
     find_package(${NAMESPACE}Plugins REQUIRED)
 
