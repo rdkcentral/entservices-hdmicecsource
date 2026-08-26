@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ inputs.source_ref || github.ref_name }}
+          ref: ${{ inputs.source_ref || (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number)) || github.ref_name }}
           path: entservices-hdmicecsource
 
       - name: Clone qemu branch for latest SuitManager and Profile.sh
@@ -75,7 +75,7 @@ jobs:
       - name: Build dependency stack
         working-directory: entservices-hdmicecsource
         run: |
-          bash -x build_dependencies.sh
+          bash -x build_dependencies_l3.sh
 
       - name: Build HDMI CEC Source plugin
         working-directory: entservices-hdmicecsource
@@ -912,12 +912,31 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
+          # Capture the compile-time baseline so plugin translation units with
+          # no runtime hits are still present in the report.
+          lcov \
+             --capture \
+             --initial \
+             --directory entservices-hdmicecsource \
+             --output-file coverage_initial.info
           lcov \
              --capture \
              --directory entservices-hdmicecsource \
-             --output-file coverage.info
+             --output-file coverage_runtime.info
           lcov \
-             --remove coverage.info \
+             --add-tracefile coverage_initial.info \
+             --add-tracefile coverage_runtime.info \
+             --output-file coverage.info
+           lcov \
+             --extract coverage.info \
+             '*/entservices-hdmicecsource/plugin/*.c' \
+             '*/entservices-hdmicecsource/plugin/*.cc' \
+             '*/entservices-hdmicecsource/plugin/*.cpp' \
+             '*/entservices-hdmicecsource/plugin/*.h' \
+             '*/entservices-hdmicecsource/plugin/*.hpp' \
+             --output-file coverage_plugin.info
+          lcov \
+             --remove coverage_plugin.info \
              '/usr/*' \
              '*/Tests/*' \
              '*/build/*' \
@@ -927,6 +946,10 @@ jobs:
              --output-directory coverage_html
           gcovr \
              --root entservices-hdmicecsource \
+             --filter '.*entservices-hdmicecsource/plugin/.*\\.(c|cc|cpp|h|hpp)$' \
+             --exclude '.*CMakeFiles.*' \
+             --exclude '.*install/usr/include/.*' \
+             --exclude '.*Tests/.*' \
              --html-details \
              --html coverage_html/gcovr.html
       - name: Upload QEMU logs and plugin artifacts
@@ -942,6 +965,9 @@ jobs:
             /tmp/qemu-artifacts/*.pid
             /tmp/qemu-artifacts/serial.log
             coverage.info
+            coverage_initial.info
+            coverage_runtime.info
+            coverage_plugin.info
             coverage_filtered.info
             coverage_html/**
           if-no-files-found: warn
