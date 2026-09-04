@@ -34,7 +34,7 @@
 
 #undef Assert // this define from Connection.hpp conflicts with WPEFramework
 
-#include "Module.h"
+#include "../Module.h"
 
 #include "UtilsBIT.h"
 #include "UtilsThreadRAII.h"
