@@ -1,7 +1,7 @@
 #include <map>
 #include <string>
-#include <libevdev/libevdev.h>
-#include <libevdev/libevdev-uinput.h>
+#include <libevdev-1.0/libevdev/libevdev.h>
+#include <libevdev-1.0/libevdev/libevdev-uinput.h>
 
 class HdmiCecVirtualRemote
 {
