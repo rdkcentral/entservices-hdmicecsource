@@ -14,26 +14,24 @@ STUB(dsDisplayInit)
 STUB(dsDisplayTerm)
 STUB(dsIsDisplayConnected)
 STUB(dsGetDisplaySurroundMode)
-STUB(dsGetEDIDBytes)
 
-int dsGetDisplay(int, int, void** handle) {
-    static int dummy_handle = 0;
+int dsGetEDIDBytes(intptr_t, unsigned char*, int* length) {
+    if (length) {
+        *length = 0;
+    }
+    return 0;
+}
+
+int dsGetDisplay(int, int, intptr_t* handle) {
+    static intptr_t dummy_handle = 0;
     if (handle) {
-        *handle = &dummy_handle;
+        *handle = dummy_handle;
     }
     return 0;
 }
 
 STUB(dsGetDisplayAspectRatio)
-
-int dsGetEDID(void*, unsigned char* edid, int* length) {
-    if (edid && length && *length >= 256) {
-        memset(edid, 0, 256);
-        *length = 256;
-        return 0;
-    }
-    return -1;
-}
+STUB(dsGetEDID)
 
 STUB(dsSetAllmEnabled)
 STUB(dsGetAllmEnabled)
