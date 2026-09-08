@@ -198,6 +198,7 @@ namespace WPEFramework {
         public:
             HdmiCecSourceImplementation();
             virtual ~HdmiCecSourceImplementation();
+            void resumeCecStack();
             void onPowerModeChanged(const PowerState currentState, const PowerState newState);
             void registerEventHandlers();
             static HdmiCecSourceImplementation* _instance;
