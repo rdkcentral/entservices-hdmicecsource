@@ -1,30 +1,11 @@
 #pragma once
 
 #include "dsVideoPort.h"
+#include "dsVideoDeviceTypes.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef enum {
-    dsVIDEO_ZOOM_NONE = 0,
-    dsVIDEO_ZOOM_FULL,
-    dsVIDEO_ZOOM_16_9_ZOOM
-} dsVideoZoom_t;
-
-typedef enum {
-    dsVIDEO_CODEC_UNKNOWN = 0,
-    dsVIDEO_CODEC_MPEG2,
-    dsVIDEO_CODEC_MPEG4PART10,
-    dsVIDEO_CODEC_H265,
-    dsVIDEO_CODEC_VP9,
-    dsVIDEO_CODEC_AV1
-} dsVideoCodingFormat_t;
-
-typedef struct {
-    uint32_t profiles;
-    uint32_t levels;
-} dsVideoCodecInfo_t;
 
 typedef void (*dsVideoDeviceFramerateCallback_t)(char*);
 
