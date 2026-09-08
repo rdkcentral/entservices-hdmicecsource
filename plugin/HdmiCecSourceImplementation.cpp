@@ -36,6 +36,15 @@
 #include "UtilsSearchRDKProfile.h"
 
 #include <telemetry_busmessage_sender.h>
+#include <array>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <linux/input.h>
+#include <linux/uinput.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #define HDMICECSOURCE_METHOD_SET_ENABLED "SetEnabled"
 #define HDMICECSOURCE_METHOD_GET_ENABLED "GetEnabled"
@@ -92,6 +101,210 @@ namespace WPEFramework
 
         HdmiCecSourceImplementation* HdmiCecSourceImplementation::_instance = nullptr;
         static int libcecInitStatus = 0;
+
+        namespace {
+            constexpr int INVALID_LINUX_KEY = -1;
+            constexpr int MAX_CEC_LOGICAL_ADDRESS = 16;
+
+            struct VirtualInputContext {
+                int uinputFd;
+                std::array<int, MAX_CEC_LOGICAL_ADDRESS> lastInjectedLinuxKey;
+                std::mutex lock;
+
+                VirtualInputContext()
+                    : uinputFd(-1)
+                {
+                    lastInjectedLinuxKey.fill(INVALID_LINUX_KEY);
+                }
+            };
+
+            VirtualInputContext& GetVirtualInputContext()
+            {
+                static VirtualInputContext context;
+                return context;
+            }
+
+            bool EmitUinputEvent(const int fd, const uint16_t type, const uint16_t code, const int32_t value)
+            {
+                struct input_event event;
+                std::memset(&event, 0, sizeof(event));
+                (void)gettimeofday(&event.time, nullptr);
+                event.type = type;
+                event.code = code;
+                event.value = value;
+
+                const ssize_t bytesWritten = write(fd, &event, sizeof(event));
+                if (bytesWritten != static_cast<ssize_t>(sizeof(event))) {
+                    LOGWARN("Failed to write uinput event type:%u code:%u value:%d", type, code, value);
+                    return false;
+                }
+
+                return true;
+            }
+
+            void DestroyVirtualKeyboard(VirtualInputContext& context)
+            {
+                if (context.uinputFd >= 0) {
+                    (void)ioctl(context.uinputFd, UI_DEV_DESTROY);
+                    (void)close(context.uinputFd);
+                    context.uinputFd = -1;
+                    context.lastInjectedLinuxKey.fill(INVALID_LINUX_KEY);
+                    LOGINFO("Destroyed virtual keyboard input device");
+                }
+            }
+
+            bool EnsureVirtualKeyboard(VirtualInputContext& context)
+            {
+                if (context.uinputFd >= 0) {
+                    return true;
+                }
+
+                context.uinputFd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+                if (context.uinputFd < 0) {
+                    LOGWARN("Unable to open /dev/uinput. key injection disabled. errno:%d", errno);
+                    return false;
+                }
+
+                auto setIoctlBit = [&](const unsigned long request, const int value, const char* bitName) -> bool {
+                    if (ioctl(context.uinputFd, request, value) < 0) {
+                        LOGWARN("uinput ioctl failed for %s, errno:%d", bitName, errno);
+                        DestroyVirtualKeyboard(context);
+                        return false;
+                    }
+                    return true;
+                };
+
+                if (!setIoctlBit(UI_SET_EVBIT, EV_KEY, "EV_KEY") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_UP, "KEY_UP") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_DOWN, "KEY_DOWN") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_LEFT, "KEY_LEFT") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_RIGHT, "KEY_RIGHT") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_ENTER, "KEY_ENTER") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_BACKSPACE, "KEY_BACKSPACE") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_HOME, "KEY_HOME") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_VOLUMEUP, "KEY_VOLUMEUP") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_VOLUMEDOWN, "KEY_VOLUMEDOWN") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_MUTE, "KEY_MUTE") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_0, "KEY_0") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_1, "KEY_1") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_2, "KEY_2") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_3, "KEY_3") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_4, "KEY_4") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_5, "KEY_5") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_6, "KEY_6") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_7, "KEY_7") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_8, "KEY_8") ||
+                    !setIoctlBit(UI_SET_KEYBIT, KEY_9, "KEY_9")) {
+                    return false;
+                }
+
+                struct uinput_setup setup;
+                std::memset(&setup, 0, sizeof(setup));
+                setup.id.bustype = BUS_USB;
+                setup.id.vendor = 0x2CA3;
+                setup.id.product = 0x1001;
+                setup.id.version = 1;
+                (void)snprintf(setup.name, UINPUT_MAX_NAME_SIZE, "%s", "HdmiCecSourceVirtualKeyboard");
+
+                if (ioctl(context.uinputFd, UI_DEV_SETUP, &setup) < 0) {
+                    LOGWARN("UI_DEV_SETUP failed, errno:%d", errno);
+                    DestroyVirtualKeyboard(context);
+                    return false;
+                }
+
+                if (ioctl(context.uinputFd, UI_DEV_CREATE) < 0) {
+                    LOGWARN("UI_DEV_CREATE failed, errno:%d", errno);
+                    DestroyVirtualKeyboard(context);
+                    return false;
+                }
+
+                LOGINFO("Created virtual keyboard at /dev/uinput for HDMI-CEC key injection");
+                return true;
+            }
+
+            int CecKeyCodeToLinuxKey(const int cecKeyCode)
+            {
+                switch (cecKeyCode) {
+                    case 0x01: return KEY_UP;
+                    case 0x02: return KEY_DOWN;
+                    case 0x03: return KEY_LEFT;
+                    case 0x04: return KEY_RIGHT;
+                    case 0x00: return KEY_ENTER;
+                    case 0x0D: return KEY_BACKSPACE;
+                    case 0x09: return KEY_HOME;
+                    case 0x41: return KEY_VOLUMEUP;
+                    case 0x42: return KEY_VOLUMEDOWN;
+                    case 0x43: return KEY_MUTE;
+                    case 0x20: return KEY_0;
+                    case 0x21: return KEY_1;
+                    case 0x22: return KEY_2;
+                    case 0x23: return KEY_3;
+                    case 0x24: return KEY_4;
+                    case 0x25: return KEY_5;
+                    case 0x26: return KEY_6;
+                    case 0x27: return KEY_7;
+                    case 0x28: return KEY_8;
+                    case 0x29: return KEY_9;
+                    default:
+                        return INVALID_LINUX_KEY;
+                }
+            }
+
+            void InjectKeyPressFromTvCec(const int logicalAddress, const int cecKeyCode)
+            {
+                VirtualInputContext& context = GetVirtualInputContext();
+                std::lock_guard<std::mutex> guard(context.lock);
+
+                const int linuxKeyCode = CecKeyCodeToLinuxKey(cecKeyCode);
+                if (linuxKeyCode == INVALID_LINUX_KEY) {
+                    LOGINFO("Unsupported inbound TV CEC keycode:0x%x", cecKeyCode);
+                    return;
+                }
+
+                if (!EnsureVirtualKeyboard(context)) {
+                    return;
+                }
+
+                if (!EmitUinputEvent(context.uinputFd, EV_KEY, static_cast<uint16_t>(linuxKeyCode), 1) ||
+                    !EmitUinputEvent(context.uinputFd, EV_SYN, SYN_REPORT, 0)) {
+                    LOGWARN("Failed to inject key press for cecKeyCode:0x%x", cecKeyCode);
+                    return;
+                }
+
+                if ((logicalAddress >= 0) && (logicalAddress < MAX_CEC_LOGICAL_ADDRESS)) {
+                    context.lastInjectedLinuxKey[logicalAddress] = linuxKeyCode;
+                }
+            }
+
+            void InjectKeyReleaseFromTvCec(const int logicalAddress)
+            {
+                if ((logicalAddress < 0) || (logicalAddress >= MAX_CEC_LOGICAL_ADDRESS)) {
+                    LOGWARN("Invalid logicalAddress in UserControlReleased: %d", logicalAddress);
+                    return;
+                }
+
+                VirtualInputContext& context = GetVirtualInputContext();
+                std::lock_guard<std::mutex> guard(context.lock);
+
+                if (!EnsureVirtualKeyboard(context)) {
+                    return;
+                }
+
+                const int linuxKeyCode = context.lastInjectedLinuxKey[logicalAddress];
+                if (linuxKeyCode == INVALID_LINUX_KEY) {
+                    LOGINFO("No tracked key to release for logicalAddress:%d", logicalAddress);
+                    return;
+                }
+
+                if (!EmitUinputEvent(context.uinputFd, EV_KEY, static_cast<uint16_t>(linuxKeyCode), 0) ||
+                    !EmitUinputEvent(context.uinputFd, EV_SYN, SYN_REPORT, 0)) {
+                    LOGWARN("Failed to inject key release for logicalAddress:%d", logicalAddress);
+                    return;
+                }
+
+                context.lastInjectedLinuxKey[logicalAddress] = INVALID_LINUX_KEY;
+            }
+        } // namespace
 
 //=========================================== HdmiCecSourceFrameListener =========================================
         void HdmiCecSourceFrameListener::notify(const CECFrame &in) const {
@@ -303,11 +516,13 @@ namespace WPEFramework
        {
              LOGINFO("Command: UserControlPressed message received from:%s command : %d \n",header.from.toString().c_str(),msg.uiCommand.toInt());
              HdmiCecSourceImplementation::_instance->SendKeyPressMsgEvent(header.from.toInt(),msg.uiCommand.toInt());
+         InjectKeyPressFromTvCec(header.from.toInt(), msg.uiCommand.toInt());
        }
        void HdmiCecSourceProcessor::process (const UserControlReleased &msg, const Header &header)
        {
              LOGINFO("Command: UserControlReleased message received from:%s \n",header.from.toString().c_str());
              HdmiCecSourceImplementation::_instance->SendKeyReleaseMsgEvent(header.from.toInt());
+         InjectKeyReleaseFromTvCec(header.from.toInt());
        }
        void HdmiCecSourceProcessor::process (const FeatureAbort &msg, const Header &header)
        {
@@ -377,6 +592,12 @@ namespace WPEFramework
          }
 
          HdmiCecSourceImplementation::_instance = nullptr;
+
+         {
+             VirtualInputContext& context = GetVirtualInputContext();
+             std::lock_guard<std::mutex> guard(context.lock);
+             DestroyVirtualKeyboard(context);
+         }
 
            if(_powerManagerPlugin)
            {
