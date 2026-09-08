@@ -3,18 +3,9 @@
 #include <cstdint>
 #include <string>
 
+#include "dsDisplay.h"
 #include "hdmiIn.hpp"
 #include "videoOutputPort.hpp"
-
-typedef enum {
-    dsDISPLAY_EVENT_CONNECTED = 0,
-    dsDISPLAY_EVENT_DISCONNECTED,
-    dsDISPLAY_RXSENSE_ON,
-    dsDISPLAY_RXSENSE_OFF,
-    dsDISPLAY_HDMIHOTPLUG_CONNECTED,
-    dsDISPLAY_HDMIHOTPLUG_DISCONNECTED,
-    dsDISPLAY_EVENT_MAX
-} dsDisplayEvent_t;
 
 namespace device {
 
