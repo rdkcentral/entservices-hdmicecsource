@@ -19,15 +19,12 @@
 
 #include "HdmiCecSourceImplementation.h"
 
-
 #include "ccec/Connection.hpp"
 #include "ccec/CECFrame.hpp"
 #include "ccec/MessageEncoder.hpp"
-#include "host.hpp"
+// COM-RPC path: DeviceSettingsClientHelper provides VideoPort/Display access
+// host.hpp, dsDisplay.h, videoOutputPort.hpp, manager.hpp are NOT used here
 
-#include "dsDisplay.h"
-#include "videoOutputPort.hpp"
-#include "manager.hpp"
 #include "websocket/URL.h"
 
 #include "UtilsIarm.h"
@@ -68,7 +65,6 @@
 #define CEC_SETTING_OSD_NAME "cecOSDName"
 #define CEC_SETTING_VENDOR_ID "cecVendorId"
 
-
 #include <atomic>
 
 enum {
@@ -91,7 +87,6 @@ static std::atomic<PowerState> devicePowerState{WPEFramework::Exchange::IPowerMa
 #define KEY_UNSUPPORTED 0xFF
 
 using namespace WPEFramework;
-
 
 namespace WPEFramework
 {
@@ -358,6 +353,8 @@ namespace WPEFramework
     , m_sendKeyEventThreadRun(false)
     , msgProcessor(nullptr)
     , msgFrameListener(nullptr)
+    , _dsVideoPortNotification(*this)
+    , _dsDisplayHotPlugNotification(*this)
     , _pwrMgrNotification(*this)
     , _registeredEventHandlers(false)
     {
@@ -371,18 +368,18 @@ namespace WPEFramework
 
          if(cecEnableStatus)
          {
-             try
-             {
-                 setEnabledInternal(false, false);
-             }
-             catch(const std::exception& e)
-             {
-                 LOGERR("Exception in setEnabledInternal during destructor: %s", e.what());
-             }
-             catch(...)
-             {
-                 LOGERR("Unknown exception in setEnabledInternal during destructor");
-             }
+            try
+            {
+                setEnabledInternal(false, false);
+            }
+            catch(const std::exception& e)
+            {
+                LOGERR("Exception in setEnabledInternal during destructor: %s", e.what());
+            }
+            catch(...)
+            {
+                LOGERR("Unknown exception in setEnabledInternal during destructor");
+            }
          }
 
          HdmiCecSourceImplementation::_instance = nullptr;
@@ -393,88 +390,53 @@ namespace WPEFramework
                _powerManagerPlugin.Reset();
            }
            _registeredEventHandlers = false;
-           try
-           {
-               device::Host::getInstance().UnRegister(baseInterface<device::Host::IDisplayDeviceEvents>());
-           }
-           catch(const std::exception& e)
-           {
-               LOGERR("Exception in UnRegister: %s", e.what());
-           }
-           catch(...)
-           {
-               LOGERR("Unknown exception in UnRegister");
-           }
+           // COM-RPC path: Close DeviceSettings link (unregisters DSVideoPortNotification internally)
+           DSHelper::Close();
     }
 
     Core::hresult HdmiCecSourceImplementation::Configure(PluginHost::IShell* service)
     {
-        LOGINFO("Configure");
+        LOGINFO("Configure (COM-RPC path)");
         ASSERT(service != nullptr);
         PowerState pwrStateCur = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         PowerState pwrStatePrev = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         Core::hresult res = Core::ERROR_GENERAL;
         string msg;
         if (Utils::IARM::init()) {
-            //Initialize cecEnableStatus to false in ctor
             cecEnableStatus = false;
-
             logicalAddressDeviceType = "None";
             logicalAddress = 0xFF;
 
-            //CEC plugin functionalities will only work if CECmgr is available. If plugin Initialize failure upper layer will call dtor directly.
             InitializePowerManager(service);
-
-            // load persistence setting
             loadSettings();
-            try
+
+            // COM-RPC path: open DeviceSettings link.
+            // Display connectivity + EDID queries are handled in
+            // OnDeviceSettingsActivated() once DeviceSettings is ready.
+            DSHelper::Open(service, "HdmiCecSource");
+
+            // get power state:
+            ASSERT (_powerManagerPlugin);
+            if (_powerManagerPlugin){
+                res = _powerManagerPlugin->GetPowerState(pwrStateCur, pwrStatePrev);
+                if (Core::ERROR_NONE == res)
+                {
+                    powerState.store((pwrStateCur == WPEFramework::Exchange::IPowerManager::POWER_STATE_ON)?0:1);
+                    LOGINFO("Current state is PowerManagerPlugin: (%d) powerState :%d \n",pwrStateCur,powerState.load());
+                }
+            }
+
+            if (cecSettingEnabled)
             {
-                //TODO(MROLLINS) this is probably per process so we either need to be running in our own process or be carefull no other plugin is calling it
-                device::Manager::Initialize();
-                device::Host::getInstance().Register(baseInterface<device::Host::IDisplayDeviceEvents>(), "WPE::CecSource");
-
-                std::string strVideoPort = device::Host::getInstance().getDefaultVideoPortName();
-                device::VideoOutputPort vPort = device::Host::getInstance().getVideoOutputPort(strVideoPort.c_str());
-                if (vPort.isDisplayConnected())
-                {
-                    std::vector<uint8_t> edidVec;
-                    vPort.getDisplay().getEDIDBytes(edidVec);
-                    //Set LG vendor id if connected with LG TV
-                    if(edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D)
-                    {
-                        isLGTvConnected = true;
-                    }
-                    LOGINFO("manufacturer byte from edid :%x: %x  isLGTvConnected :%d",edidVec.at(8),edidVec.at(9),isLGTvConnected);
-                }
-             }
-             catch(...)
-             {
-                 LOGWARN("Exception in getting edid info .\r\n");
-             }
-
-             // get power state:
-             ASSERT (_powerManagerPlugin);
-             if (_powerManagerPlugin){
-                 res = _powerManagerPlugin->GetPowerState(pwrStateCur, pwrStatePrev);
-                 if (Core::ERROR_NONE == res)
-                 {
-                      devicePowerState.store(pwrStateCur);
-                      powerState.store((pwrStateCur == WPEFramework::Exchange::IPowerManager::POWER_STATE_ON)?DEVICE_POWER_STATE_ON:DEVICE_POWER_STATE_OFF);
-                      LOGINFO("Current state is PowerManagerPlugin: (%d) powerState :%d \n",pwrStateCur,powerState.load());
-                 }
-             }
-
-             if (cecSettingEnabled)
-             {
-                try
-                {
-                    CECEnable();
-                }
-                catch(...)
-                {
-                    LOGWARN("Exception while enabling CEC settings .\r\n");
-                }
-             }
+               try
+               {
+                   CECEnable();
+               }
+               catch(...)
+               {
+                   LOGWARN("Exception while enabling CEC settings .\r\n");
+               }
+            }
         } else {
             msg = "IARM bus is not available";
             LOGERR("IARM bus is not available. Failed to activate HdmiCecSource Plugin");
@@ -482,6 +444,85 @@ namespace WPEFramework
         ASSERT(_powerManagerPlugin);
         registerEventHandlers();
         return Core::ERROR_NONE;
+    }
+
+    // -----------------------------------------------------------------------
+    // COM-RPC lifecycle: DeviceSettings activated — query display state
+    // -----------------------------------------------------------------------
+    void HdmiCecSourceImplementation::OnDeviceSettingsActivated()
+    {
+        LOGINFO("OnDeviceSettingsActivated: caching handles and registering notifications");
+        // Config is loaded lazily by DSHelper::_ensureConfigLoaded() on the first accessor call.
+        // No explicit LoadVideoPortConfig call needed.
+
+        const std::string defaultVP = DSHelper::getDefaultVideoPortName();
+        VideoPortEntry defaultEntry{};
+        const bool entryResolved = DSHelper::resolveVideoPortByName(defaultVP, defaultEntry);
+
+        // Register for resolution change notifications (fires on HDMI hotplug)
+        {
+            auto* vp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
+            if (vp != nullptr) {
+                vp->Register("HdmiCecSource", &_dsVideoPortNotification);
+                vp->Release();
+            } else {
+                LOGERR("OnDeviceSettingsActivated: IDeviceSettingsVideoPort not available");
+            }
+        }
+
+        // Acquire display handle for default port (not cached by DSHelper::LoadAllConfigs)
+        _displayHandle = INVALID_DS_HANDLE;
+        if (entryResolved && DSHelper::getCachedVideoPortHandle(defaultVP) != INVALID_DS_HANDLE) {
+            auto* disp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+            if (disp != nullptr) {
+                Exchange::IDeviceSettingsDisplay::DisplayPortType dpType =
+                    static_cast<Exchange::IDeviceSettingsDisplay::DisplayPortType>(defaultEntry.type);
+                Core::hresult rc = disp->GetDisplay(dpType, defaultEntry.index, _displayHandle);
+                if (rc != Core::ERROR_NONE) {
+                    LOGERR("OnDeviceSettingsActivated: GetDisplay failed: %u", rc);
+                    _displayHandle = INVALID_DS_HANDLE;
+                } else {
+                    LOGINFO("OnDeviceSettingsActivated: cached _displayHandle=%d", _displayHandle);
+                }
+                // Register for HDMI hotplug (both connect and disconnect events)
+                disp->Register("HdmiCecSource", &_dsDisplayHotPlugNotification);
+                disp->Release();
+            }
+        }
+
+        // Check display connected and detect LG TV via EDID manufacturer bytes
+        const int32_t vpHandle = DSHelper::getCachedVideoPortHandle(defaultVP);
+        if (vpHandle != INVALID_DS_HANDLE) {
+            auto* vp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
+            if (vp2 != nullptr) {
+                bool connected = false;
+                if (vp2->IsVideoPortDisplayConnected(vpHandle, connected) == Core::ERROR_NONE && connected) {
+                    if (_displayHandle != INVALID_DS_HANDLE) {
+                        auto* disp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+                        if (disp2 != nullptr) {
+                            static const uint16_t kEdidBufLen = 256;
+                            std::vector<uint8_t> edidVec(kEdidBufLen, 0);
+                            if (disp2->GetDisplayEdidBytes(_displayHandle, edidVec.data(), kEdidBufLen) == Core::ERROR_NONE) {
+                                if (edidVec.size() > 9 && edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D) {
+                                    isLGTvConnected = true;
+                                }
+                                LOGINFO("OnDeviceSettingsActivated: manufacturer bytes %02x %02x isLGTvConnected=%d",
+                                        edidVec.at(8), edidVec.at(9), isLGTvConnected);
+                            }
+                            disp2->Release();
+                        }
+                    }
+                }
+                vp2->Release();
+            }
+        }
+    }
+
+    void HdmiCecSourceImplementation::OnDeviceSettingsDeactivated()
+    {
+        LOGINFO("OnDeviceSettingsDeactivated: clearing cached handles");
+        _displayHandle = INVALID_DS_HANDLE;
+        // Config stores and port handles cleared by DSHelper::Operational(false)
     }
 
     void HdmiCecSourceImplementation::registerEventHandlers()
@@ -579,18 +620,18 @@ namespace WPEFramework
 	}
 
     void HdmiCecSourceImplementation::removeDevice(const int logicalAddress) {
-		if(!HdmiCecSourceImplementation::_instance)
-			return;
+        if(!HdmiCecSourceImplementation::_instance)
+            return;
 
-		if ( logicalAddress >= LogicalAddress::UNREGISTERED ){
-			LOGERR("Logical Address NOT Allocated Or its not valid");
-			return;
-		}
+        if ( logicalAddress >= LogicalAddress::UNREGISTERED ){
+            LOGERR("Logical Address NOT Allocated Or its not valid");
+            return;
+        }
 
-		if (BIT_CHECK(HdmiCecSourceImplementation::_instance->deviceList[logicalAddress].m_deviceInfoStatus, BIT_DEVICE_PRESENT))
-		{
-			_instance->m_numberOfDevices--;
-			_instance->deviceList[logicalAddress].clear();
+        if (BIT_CHECK(HdmiCecSourceImplementation::_instance->deviceList[logicalAddress].m_deviceInfoStatus, BIT_DEVICE_PRESENT))
+        {
+            _instance->m_numberOfDevices--;
+            _instance->deviceList[logicalAddress].clear();
             LOGINFO("Cec logical address remove notification send:  \r\n");
             std::list<Exchange::IHdmiCecSource::INotification*> notifyList;
             _adminLock.Lock();
@@ -611,8 +652,8 @@ namespace WPEFramework
                 n->Release();
             }
 
-		}
-	}
+        }
+    }
 
 
         Core::hresult HdmiCecSourceImplementation::GetActiveSourceStatus(bool &isActiveSource, bool &success)
@@ -758,39 +799,9 @@ namespace WPEFramework
             registerEventHandlers();
         }
 
-        void HdmiCecSourceImplementation::threadHotPlugEventHandler(int data)
-        {
-            LOGINFO("entry threadHotPlugEventHandler \r\n");
-            if(!HdmiCecSourceImplementation::_instance)
-                return;
-
-            LOGINFO("Pocessing IARM_BUS_DSMGR_EVENT_HDMI_HOTPLUG  event status:%d \r\n",data);
-            HdmiCecSourceImplementation::_instance->onHdmiHotPlug(data);
-            //Trigger CEC device poll here
-            pthread_mutex_lock(&(_instance->m_lock));
-            pthread_cond_signal(&(_instance->m_condSig));
-            pthread_mutex_unlock(&(_instance->m_lock));
-
-            LOGINFO("Exit threadHotPlugEventHandler \r\n");
-        }
-
-       void HdmiCecSourceImplementation::OnDisplayHDMIHotPlug(dsDisplayEvent_t displayEvent)
-       {
-           LOGINFO("HdmiCecSourceImplementation::OnDisplayHDMIHotPlug : displayEvent = %d ", displayEvent);
-
-           if(!HdmiCecSourceImplementation::_instance  || !_instance->cecEnableStatus)
-           {
-			   bool cecEnableStatus = _instance ? _instance->cecEnableStatus : false;
-               LOGINFO("HdmiCecSourceImplementation::OnDisplayHDMIHotPlug failed _instance:%p cecEnableStatus:%d  \r\n", HdmiCecSourceImplementation::_instance, cecEnableStatus);
-               return;
-           }
-
-           int hdmi_hotplug_event = (int) displayEvent;
-           LOGINFO("Received IARM_BUS_DSMGR_EVENT_HDMI_HOTPLUG  event data:%d \r\n", hdmi_hotplug_event);
-           std::thread worker(threadHotPlugEventHandler,hdmi_hotplug_event);
-           worker.detach();
-
-       }
+       // HDMI hotplug in the COM-RPC path is handled via DSDisplayHotPlugNotification::OnDisplayHDMIHotPlug
+       // (IDeviceSettingsDisplay::IDisplayHDMIHotPlugNotification), which carries both connect and disconnect.
+       // DSVideoPortNotification::OnResolutionPostChange is kept as a secondary connect-only signal.
 
        void HdmiCecSourceImplementation::onPowerModeChanged(const PowerState currentState, const PowerState newState)
        {
@@ -808,6 +819,7 @@ namespace WPEFramework
             else
                 powerState.store(DEVICE_POWER_STATE_OFF);
 
+
             if (cecEnableStatus) {
                 pthread_mutex_lock(&m_lock);
                 pthread_cond_signal(&m_condSig);
@@ -818,72 +830,94 @@ namespace WPEFramework
        void HdmiCecSourceImplementation::resumeCecStack()
         {
             try {
-                getLogicalAddress();
-                if(cecEnableStatus){
-                    if (smConnection && logicalAddress.toInt() != LogicalAddress::UNREGISTERED) {
-                        // Re-announce physical address and vendor ID on bus
-                        smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST),
-                            MessageEncoder().encode(
-                                ReportPhysicalAddress(physical_addr, logicalAddress.toInt())));
-                        smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST),
-                            MessageEncoder().encode(DeviceVendorID(
-                                isLGTvConnected ? lgVendorId : appVendorId)));
-                        // Refresh TV power status
-                        smConnection->sendTo(LogicalAddress::TV,
-                            MessageEncoder().encode(GiveDevicePowerStatus()));
+                    getLogicalAddress();
+                    if(cecEnableStatus){
+                        if (smConnection && logicalAddress.toInt() != LogicalAddress::UNREGISTERED) {
+                            // Re-announce physical address and vendor ID on bus
+                            smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST),
+                                MessageEncoder().encode(
+                                    ReportPhysicalAddress(physical_addr, logicalAddress.toInt())));
+                            smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST),
+                                MessageEncoder().encode(DeviceVendorID(
+                                    isLGTvConnected ? lgVendorId : appVendorId)));
+                            // Refresh TV power status
+                            smConnection->sendTo(LogicalAddress::TV,
+                                MessageEncoder().encode(GiveDevicePowerStatus()));
+                        }
                     }
-                }
-            } catch (...) {
+                } catch (...) {
                 LOGWARN("CEC resume stack revalidation failed — will retry on next hot-plug");
             }
         }
+
+       void HdmiCecSourceImplementation::dispatchEvent(Event event, int connectStatus)
+       {
+            Core::IWorkerPool::Instance().Submit(HotPlugJob::Create(this, event, connectStatus));
+       }
+
+       void HdmiCecSourceImplementation::Dispatch(Event event, int connectStatus)
+       {
+            if (!HdmiCecSourceImplementation::_instance) return;
+            if (event == EV_HOTPLUG) {
+                _instance->onHdmiHotPlug(connectStatus);
+            }
+       }
 
        void HdmiCecSourceImplementation::onHdmiHotPlug(int connectStatus)
        {
             if (HDMI_HOT_PLUG_EVENT_CONNECTED == connectStatus)
             {
-                LOGINFO ("onHdmiHotPlug Status : %d ", connectStatus);
+                LOGINFO("onHdmiHotPlug Status : %d HDMI Connected (COM-RPC path)", connectStatus);
                 getPhysicalAddress();
                 getLogicalAddress();
-                try
-                {
-                   std::string strVideoPort = device::Host::getInstance().getDefaultVideoPortName();
-                   device::VideoOutputPort vPort = device::Host::getInstance().getVideoOutputPort(strVideoPort.c_str());
-                   if (vPort.isDisplayConnected())
-                   {
-                     std::vector<uint8_t> edidVec;
-                     vPort.getDisplay().getEDIDBytes(edidVec);
-                     //Set LG vendor id if connected with LG TV
-                     if(edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D)
-                     {
-                         isLGTvConnected = true;
-                     }
-                     LOGINFO("manufacturer byte from edid :%x: %x  isLGTvConnected :%d",edidVec.at(8),edidVec.at(9),isLGTvConnected);
-                   }
-                 }
-                 catch(...)
-                 {
-                    LOGWARN("Exception in getting edid info .\r\n");
-                 }
-                 if(smConnection)
-                 {
-                     try
-                     {
-                         LOGINFO(" sending ReportPhysicalAddress response physical_addr :%s logicalAddress :%x \n",physical_addr.toString().c_str(), logicalAddress.toInt());
-                         smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(ReportPhysicalAddress(physical_addr,logicalAddress.toInt()))); 
 
-                         LOGINFO("Command: GiveDeviceVendorID sending VendorID response :%s\n", \
-                             (isLGTvConnected)?lgVendorId.toString().c_str():appVendorId.toString().c_str());
-                         if(isLGTvConnected)
-                             smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(DeviceVendorID(lgVendorId)));
-                         else 
-                             smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(DeviceVendorID(appVendorId)));
-                     } 
-                     catch(...)
-                     {
-                         LOGWARN("Exception while sending Messages onHdmiHotPlug\n");
-                     }
-                 }
+                // COM-RPC path: query connectivity and EDID via DeviceSettings plugin
+                const int32_t vpHandle = DSHelper::getCachedVideoPortHandle(DSHelper::getDefaultVideoPortName());
+                if (vpHandle != INVALID_DS_HANDLE) {
+                    auto* vp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
+                    if (vp != nullptr) {
+                        bool connected = false;
+                        if (vp->IsVideoPortDisplayConnected(vpHandle, connected) == Core::ERROR_NONE && connected) {
+                            if (_displayHandle != INVALID_DS_HANDLE) {
+                                auto* disp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+                                if (disp != nullptr) {
+                                    static const uint16_t kEdidBufLen = 256;
+                                    std::vector<uint8_t> edidVec(kEdidBufLen, 0);
+                                    if (disp->GetDisplayEdidBytes(_displayHandle, edidVec.data(), kEdidBufLen) == Core::ERROR_NONE
+                                        && edidVec.size() > 9) {
+                                        if (edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D) {
+                                            isLGTvConnected = true;
+                                        }
+                                        LOGINFO("manufacturer byte from edid :%x: %x  isLGTvConnected :%d",
+                                                edidVec.at(8), edidVec.at(9), isLGTvConnected);
+                                    }
+                                    disp->Release();
+                                }
+                            }
+                        }
+                        vp->Release();
+                    }
+                }
+
+                if(smConnection)
+                {
+                    try
+                    {
+                        LOGINFO(" sending ReportPhysicalAddress response physical_addr :%s logicalAddress :%x \n",physical_addr.toString().c_str(), logicalAddress.toInt());
+                        smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(ReportPhysicalAddress(physical_addr,logicalAddress.toInt())));
+
+                        LOGINFO("Command: GiveDeviceVendorID sending VendorID response :%s\n",
+                            (isLGTvConnected)?lgVendorId.toString().c_str():appVendorId.toString().c_str());
+                        if(isLGTvConnected)
+                            smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(DeviceVendorID(lgVendorId)));
+                        else
+                            smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(DeviceVendorID(appVendorId)));
+                    }
+                    catch(...)
+                    {
+                        LOGWARN("Exception while sending Messages onHdmiHotPlug\n");
+                    }
+                }
             }
             else
             {
@@ -1472,11 +1506,11 @@ namespace WPEFramework
 		    catch (...)
 		    {
 		    	LOGERR("Exception in api");
+                localDevices.clear();
 		    	success = false;
-			    localDevices.clear();
 		    }
             numberofdevices = static_cast<uint32_t>(localDevices.size());
-	    LOGINFO("GetDeviceList returning %u devices", numberofdevices);
+	        LOGINFO("GetDeviceList returning %u devices", numberofdevices);
             deviceList = (Core::Service<RPC::IteratorType<Exchange::IHdmiCecSource::IHdmiCecSourceDeviceListIterator>>::Create<Exchange::IHdmiCecSource::IHdmiCecSourceDeviceListIterator>(localDevices));
             return Core::ERROR_NONE;
 	    }
@@ -1622,25 +1656,21 @@ namespace WPEFramework
 		pthread_mutex_lock(&(_instance->m_lock));//pthread_cond_wait should be mutex protected. //pthread_cond_wait will unlock the mutex and perfoms wait for the condition.
 		while (!_instance->m_pollThreadExit) {
             if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load())){
-			    bool isActivateUpdateThread = false;
-			    LOGINFO("Starting cec device polling");
-			    for(i=0; i< LogicalAddress::UNREGISTERED; i++ ) {
-			    	bool isConnected = _instance->pingDeviceUpdateList(i);
-			    	if (isConnected){
-			    		isActivateUpdateThread = isConnected;
-			    	}
-                    if(_instance->m_pollThreadExit || (WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
-                    {
-                        break;
-                    }
+		    	bool isActivateUpdateThread = false;
+		    	LOGINFO("Starting cec device polling");
+		    	for(i=0; i< LogicalAddress::UNREGISTERED; i++ ) {
+		    		bool isConnected = _instance->pingDeviceUpdateList(i);
+		    		if (isConnected){
+		    			isActivateUpdateThread = isConnected;
+		    		}
 
-			    }
-			    if (isActivateUpdateThread){
-			    	//i any of devices is connected activate thread update check
-			    	pthread_cond_signal(&(_instance->m_condSigUpdate));
-			    }
-			    //Wait for mutex signal here to continue the worker thread again.
-			    pthread_cond_wait(&(_instance->m_condSig), &(_instance->m_lock));
+		    	}
+		    	if (isActivateUpdateThread){
+		    		//i any of devices is connected activate thread update check
+		    		pthread_cond_signal(&(_instance->m_condSigUpdate));
+		    	}
+		    	//Wait for mutex signal here to continue the worker thread again.
+		    	pthread_cond_wait(&(_instance->m_condSig), &(_instance->m_lock));
             }
             else{
                 pthread_mutex_unlock(&(_instance->m_lock));
@@ -1665,9 +1695,11 @@ namespace WPEFramework
                 {
                     keyInfo.logicalAddr = -1;
                     keyInfo.keyCode = -1;
-                    // Wait for a message to be added to the queue
-                    std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
-                    _instance->m_sendKeyCV.wait(lk, []{return (_instance->m_sendKeyEventThreadRun == true);});
+                    {
+                        // Wait for a message to be added to the queue
+                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
+                        _instance->m_sendKeyCV.wait(lk, []{return (_instance->m_sendKeyEventThreadRun == true);});
+                    }
 
                     if (_instance->m_sendKeyEventThreadExit == true)
                     {
@@ -1708,69 +1740,64 @@ namespace WPEFramework
 		while (!_instance->m_updateThreadExit) {
             if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
             {
-		    	//Wait for mutex signal here to continue the worker thread again.
-		    	pthread_cond_wait(&(_instance->m_condSigUpdate), &(_instance->m_lockUpdate));
+			    //Wait for mutex signal here to continue the worker thread again.
+			    pthread_cond_wait(&(_instance->m_condSigUpdate), &(_instance->m_lockUpdate));
 
-		    	LOGINFO("Starting cec device update check");
-		    	for(i=0; ((i< LogicalAddress::UNREGISTERED)&&(!_instance->m_updateThreadExit)); i++ ) {
-		    		//If details are not updated. update now.
-		    		if (BIT_CHECK(HdmiCecSourceImplementation::_instance->deviceList[i].m_deviceInfoStatus, BIT_DEVICE_PRESENT))
-		    		{
-		    			int itr = 0;
-		    			bool retry = true;
-		    			int iCounter = 0;
-		    			for (itr = 0; ((itr<5)&&(retry)); itr++){
+			    LOGINFO("Starting cec device update check");
+			    for(i=0; ((i< LogicalAddress::UNREGISTERED)&&(!_instance->m_updateThreadExit)); i++ ) {
+			    	//If details are not updated. update now.
+			    	if (BIT_CHECK(HdmiCecSourceImplementation::_instance->deviceList[i].m_deviceInfoStatus, BIT_DEVICE_PRESENT))
+			    	{
+			    		int itr = 0;
+			    		bool retry = true;
+			    		int iCounter = 0;
+			    		for (itr = 0; ((itr<5)&&(retry)); itr++){
 
-		    				if (!HdmiCecSourceImplementation::_instance->deviceList[i].m_isOSDNameUpdated){
-		    					iCounter = 0;
-		    					while ((!_instance->m_updateThreadExit) && (iCounter < (2*10))) { //sleep for 2sec.
-		    						/* Delay allows CEC device response time as per HDMI-CEC specification before requesting OSD name */
-		    						/* coverity[sleep : FALSE] */
-		    						usleep (100 * 1000); //sleep for 100 milli sec
-		    						iCounter ++;
-		    					}
+			    			if (!HdmiCecSourceImplementation::_instance->deviceList[i].m_isOSDNameUpdated){
+			    				iCounter = 0;
+			    				while ((!_instance->m_updateThreadExit) && (iCounter < (2*10))) { //sleep for 2sec.
+			    					/* Delay allows CEC device response time as per HDMI-CEC specification before requesting OSD name */
+			    					/* coverity[sleep : FALSE] */
+			    					usleep (100 * 1000); //sleep for 100 milli sec
+			    					iCounter ++;
+			    				}
 
-		    					HdmiCecSourceImplementation::_instance->requestOsdName (i);
-		    					retry = true;
-		    				}
-		    				else {
-		    					retry = false;
-		    				}
+			    				HdmiCecSourceImplementation::_instance->requestOsdName (i);
+			    				retry = true;
+			    			}
+			    			else {
+			    				retry = false;
+			    			}
 
-		    				if (!HdmiCecSourceImplementation::_instance->deviceList[i].m_isVendorIDUpdated){
-		    					iCounter = 0;
-		    					while ((!_instance->m_updateThreadExit) && (iCounter < (2*10))) { //sleep for 2sec.
-		    						/* Delay allows CEC device response time as per HDMI-CEC specification before requesting vendor ID */
-		    						/* coverity[sleep : FALSE] */
-		    						usleep (100 * 1000); //sleep for 100 milli sec
-		    						iCounter ++;
-		    					}
+			    			if (!HdmiCecSourceImplementation::_instance->deviceList[i].m_isVendorIDUpdated){
+			    				iCounter = 0;
+			    				while ((!_instance->m_updateThreadExit) && (iCounter < (2*10))) { //sleep for 2sec.
+			    					/* Delay allows CEC device response time as per HDMI-CEC specification before requesting vendor ID */
+			    					/* coverity[sleep : FALSE] */
+			    					usleep (100 * 1000); //sleep for 100 milli sec
+			    					iCounter ++;
+			    				}
 
-		    					HdmiCecSourceImplementation::_instance->requestVendorID (i);
-		    					retry = true;
-		    				}
-
-                            if(_instance->m_updateThreadExit)
-                            {
-                                break;
-                            }
-		    			}
-						if (retry) {
-							LOGINFO("cec device: %d update time out", i);
-						}
-                    } 
-		        }
+			    				HdmiCecSourceImplementation::_instance->requestVendorID (i);
+			    				retry = true;
+			    			}
+			    		}
+			    		if (retry){
+			    			LOGINFO("cec device: %d update time out", i);
+			    		}
+			    	}
+			    }
             }
             else {
                 pthread_mutex_unlock(&(_instance->m_lockUpdate));
                 usleep(200000); // sleep 200ms in deep sleep to avoid spinning while holding the lock
                 pthread_mutex_lock(&(_instance->m_lockUpdate));
             }
-        }
+
+		}
 		pthread_mutex_unlock(&(_instance->m_lockUpdate));
-	    LOGINFO("%s: Thread exited", __FUNCTION__);     
-        
-    }
+	    LOGINFO("%s: Thread exited", __FUNCTION__);
+	}
 
 
     void  HdmiCecSourceImplementation::sendDeviceUpdateInfo(const int logicalAddress)
