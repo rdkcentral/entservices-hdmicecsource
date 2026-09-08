@@ -68,7 +68,6 @@ STUB(dsGetCurrentDisplayframerate)
 STUB(dsSetDisplayframerate)
 STUB(dsRegisterFrameratePreChangeCB)
 STUB(dsRegisterFrameratePostChangeCB)
-STUB(dsHdmiInSelectZoomMode)
 
 STUB(dsVideoPortInit)
 STUB(dsVideoPortTerm)
