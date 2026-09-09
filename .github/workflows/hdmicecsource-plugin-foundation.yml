@@ -947,11 +947,11 @@ jobs:
              --output-directory coverage_html
           gcovr \
              --root entservices-hdmicecsource \
-             --filter '.*entservices-hdmicecsource/plugin/.*\\.(c|cc|cpp|h|hpp)$' \
+             --filter '.*entservices-hdmicecsource/plugin/.*\\.(c|cc|cpp|h|hpp)$' 
              --exclude '.*CMakeFiles.*' \
              --exclude '.*install/usr/include/.*' \
              --exclude '.*Tests/.*' \
-             --fail-under-line "$MIN_COVERAGE"
+             --fail-under-line "$MIN_COVERAGE" \
              --html-details \
              --html coverage_html/gcovr.html
       - name: Upload QEMU logs and plugin artifacts
