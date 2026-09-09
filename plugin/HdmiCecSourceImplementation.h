@@ -56,7 +56,7 @@
 
 #undef Assert // conflicts with WPEFramework
 
-#include "../Module.h"
+#include "Module.h"
 
 #include "UtilsBIT.h"
 #include "UtilsThreadRAII.h"
