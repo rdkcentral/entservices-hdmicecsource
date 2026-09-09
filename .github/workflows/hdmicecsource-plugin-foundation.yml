@@ -54,6 +54,7 @@ jobs:
       GITHUB_IMAGE_ASSET_NAME: DefaultImage.tar.gz
       DEPLOY_RUNTIME_LIBS: 'true'
       REQUIRE_NEEDED_MATCH: 'true'
+      MIN_COVERAGE: '80'
 
     steps:
       - name: Clone entservices-hdmicecsource (build branch)
@@ -950,6 +951,7 @@ jobs:
              --exclude '.*CMakeFiles.*' \
              --exclude '.*install/usr/include/.*' \
              --exclude '.*Tests/.*' \
+             --fail-under-line "$MIN_COVERAGE"
              --html-details \
              --html coverage_html/gcovr.html
       - name: Upload QEMU logs and plugin artifacts
