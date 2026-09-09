@@ -945,15 +945,29 @@ jobs:
           genhtml \
              coverage_filtered.info \
              --output-directory coverage_html
-          gcovr \
-             --root entservices-hdmicecsource \
-             --filter '.*entservices-hdmicecsource/plugin/.*\\.(c|cc|cpp|h|hpp)$' 
-             --exclude '.*CMakeFiles.*' \
-             --exclude '.*install/usr/include/.*' \
-             --exclude '.*Tests/.*' \
-             --fail-under-line "$MIN_COVERAGE" \
-             --html-details \
-             --html coverage_html/gcovr.html
+          coverage_summary="$(lcov --summary coverage_filtered.info 2>&1)"
+          line_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*lines\.*: \([0-9.]*\)%.*/\1/p')"
+          function_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*functions\.*: \([0-9.]*\)%.*/\1/p')"
+
+          [[ -n "$line_coverage" && -n "$function_coverage" ]] || {
+            echo "ERROR: unable to read line and function coverage from coverage_filtered.info" >&2
+            exit 1
+          }
+
+          echo "Required coverage: ${MIN_COVERAGE}%"
+          echo "Line coverage: ${line_coverage}%"
+          echo "Function coverage: ${function_coverage}%"
+          awk -v actual="$line_coverage" -v minimum="$MIN_COVERAGE" \
+            'BEGIN { exit (actual < minimum) }' || {
+              echo "ERROR: line coverage is below the required minimum" >&2
+              exit 1
+            }
+          awk -v actual="$function_coverage" -v minimum="$MIN_COVERAGE" \
+            'BEGIN { exit (actual < minimum) }' || {
+              echo "ERROR: function coverage is below the required minimum" >&2
+              exit 1
+            }
+       
       - name: Upload QEMU logs and plugin artifacts
         if: always()
         uses: actions/upload-artifact@v4
