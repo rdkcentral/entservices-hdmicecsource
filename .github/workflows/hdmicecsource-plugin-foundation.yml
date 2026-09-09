@@ -54,7 +54,7 @@ jobs:
       GITHUB_IMAGE_ASSET_NAME: DefaultImage.tar.gz
       DEPLOY_RUNTIME_LIBS: 'true'
       REQUIRE_NEEDED_MATCH: 'true'
-      MIN_COVERAGE: '60'
+      MIN_COVERAGE: '80'
 
     steps:
       - name: Clone entservices-hdmicecsource (build branch)
