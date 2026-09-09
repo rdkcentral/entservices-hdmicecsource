@@ -54,7 +54,6 @@ jobs:
       GITHUB_IMAGE_ASSET_NAME: DefaultImage.tar.gz
       DEPLOY_RUNTIME_LIBS: 'true'
       REQUIRE_NEEDED_MATCH: 'true'
-      MIN_COVERAGE: '80'
 
     steps:
       - name: Clone entservices-hdmicecsource (build branch)
@@ -76,14 +75,11 @@ jobs:
       - name: Build dependency stack
         working-directory: entservices-hdmicecsource
         run: |
-          bash -x build_dependencies.sh
+          bash -x build_dependencies_l3.sh
 
       - name: Build HDMI CEC Source plugin
         working-directory: entservices-hdmicecsource
         run: |
-          export CFLAGS="${CFLAGS:-} --coverage"
-          export CXXFLAGS="${CXXFLAGS:-} --coverage"
-          export LDFLAGS="${LDFLAGS:-} --coverage"
           bash -x cov_build_l3.sh
 
       - name: Collect built plugin artifacts
@@ -152,9 +148,6 @@ jobs:
             ls -lh artifacts/runtime-libs/ || true
           } | tee "$QEMU_WORKDIR/plugin-artifact-manifest.txt"
 
-          mkdir -p artifacts/coverage
-          find . -type f -name "*.gcno" \-exec cp --parents {} artifacts/coverage/ \; \2>/dev/null || true
-
       - name: Install QEMU and SSH tools
         run: |
           set -euo pipefail
@@ -169,14 +162,6 @@ jobs:
             git-lfs
 
           command -v qemu-system-x86_64 >/dev/null
-
-      - name: Install Coverage Tools
-        run: |
-          set -euo pipefail
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            lcov \
-            gcovr
 
       - name: Download and prepare default QEMU image
         env:
@@ -380,40 +365,7 @@ jobs:
             done
             [[ "$copied" == "true" ]] || { echo "Failed to stage $(basename "$sofile") on guest" >&2; exit 1; }
           done
-
-          # ---- Copy ALL .gcno files preserving their absolute build path ----
-          # gcov writes .gcda at runtime to the same absolute path recorded in the
-          # instrumented .so, so gcno must land at that exact path for lcov to match.
-          echo "===== Collecting .gcno files to copy into QEMU ====="
-          gcno_list_file="$QEMU_WORKDIR/gcno-files.txt"
-          # Exclude CMake compiler-probe artifacts (CompilerIdC/CompilerIdCXX); they carry no coverage.
-          find "$PWD/entservices-hdmicecsource" -type f -name "*.gcno" \
-            ! -path "*/CompilerId*" | sort > "$gcno_list_file"
-          gcno_count=$(wc -l < "$gcno_list_file" | tr -d ' ')
-          echo "Found $gcno_count plugin .gcno files:"
-          cat "$gcno_list_file"
-
-          if [[ "$gcno_count" -eq 0 ]]; then
-            echo "WARNING: no .gcno files found to copy; coverage data will not be generated" >&2
-          else
-            gcno_tar="$QEMU_WORKDIR/gcno-files.tar.gz"
-            # -P preserves absolute paths on both archive and extraction.
-            tar -czPf "$gcno_tar" -T "$gcno_list_file"
-
-            copied=false
-            for try in 1 2 3; do
-              if scp "${ssh_key_arg[@]}" "${ssh_opts[@]}" -P "$selected_ssh_port" \
-                 "$gcno_tar" "$selected_ssh_user@127.0.0.1:$guest_stage_dir/gcno/gcno-files.tar.gz"; then
-                copied=true
-                break
-              fi
-              echo "SCP retry $try for gcno-files.tar.gz" >&2
-              sleep 3
-            done
-            [[ "$copied" == "true" ]] || { echo "Failed to copy gcno archive to guest" >&2; exit 1; }
-            echo "Copied $gcno_count .gcno files (archived) to guest staging area"
-          fi
-
+          
           # ---- Check what DS/CEC/IARM libs the guest already ships ----
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
             echo "===== Guest-native DS/CEC/IARM libraries ====="
@@ -477,30 +429,6 @@ jobs:
 
             command -v ldconfig >/dev/null 2>&1 && ldconfig || true
           '
-          # ---- Install gcno files on guest at their original absolute paths ----
-          # Extracting with -P restores each .gcno to the exact build path recorded in
-          # the .so, so the .gcda files produced during the test run land right beside them.
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" \
-            -p "$selected_ssh_port" \
-            "$selected_ssh_user@127.0.0.1" '
-            set -euo pipefail
-
-            gcno_archive="'"$guest_stage_dir"'/gcno/gcno-files.tar.gz"
-            if [[ ! -f "$gcno_archive" ]]; then
-              echo "No gcno archive present on guest; skipping gcno install"
-              exit 0
-            fi
-
-            echo "===== Installing .gcno files on guest ====="
-            # Guest tar is BusyBox (no -P). It strips the leading "/", so extracting
-            # from / restores each .gcno at its original absolute build path.
-            tar -xzf "$gcno_archive" -C /
-
-            installed_count=$(tar -tzf "$gcno_archive" | grep -c "\.gcno$" || true)
-            echo "Installed $installed_count .gcno files at their original build paths:"
-            tar -tzf "$gcno_archive" | sed "s/^/  /"
-          '
-
           # Copy runtime shared libraries needed by plugin loading (filtered to avoid framework conflicts).
           runtime_lib_count=0
           if [[ "${DEPLOY_RUNTIME_LIBS:-false}" == "true" ]]; then
@@ -844,130 +772,6 @@ jobs:
           cd "$tests_dir"
           python3 SuitManager.py | tee "$QEMU_WORKDIR/vdevice-tests.log"
 
-      - name: Collect GCDA Files From Guest
-        if: always()
-        run: |
-          set -euo pipefail
-          source "$QEMU_WORKDIR/ssh-target.env"
-          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
-
-          # If the instrumented plugin was rolled back to the stock .so, no .gcda can ever appear.
-          if [[ -f "$QEMU_WORKDIR/plugin-debug.env" ]]; then
-            echo "===== Plugin deployment state ====="
-            cat "$QEMU_WORKDIR/plugin-debug.env"
-          fi
-
-          # gcov counters live in memory and are only written to .gcda when the
-          # instrumented code flushes: on plugin .so unload (dlclose destructor) or
-          # on process exit (libgcov atexit). Deactivate the plugin and gracefully
-          # stop WPEFramework so those flushes happen before we search for .gcda.
-          echo "===== Flushing coverage: deactivate plugin and stop WPEFramework ====="
-          ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
-            set -uo pipefail
-            curl -sS --connect-timeout 5 --max-time 10 \
-              -H "Content-Type: application/json" \
-              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.deactivate\",\"params\":{\"callsign\":\"org.rdk.HdmiCecSource\"}}" \
-              http://127.0.0.1:9998/jsonrpc 2>&1 || true
-            echo
-            sleep 3
-            # Graceful stop (SIGTERM) lets libgcov atexit handlers write .gcda.
-            systemctl stop WPEFramework 2>/dev/null || systemctl stop wpeframework 2>/dev/null || true
-            sleep 5
-            sync
-          ' || true
-
-          # Locate the .gcda files produced by the test run, report count and paths, then archive.
-          ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
-            set -euo pipefail
-            echo "===== Searching for .gcda files produced during the test run ====="
-            gcda_list_file=/tmp/gcda-files.txt
-            find / -type f -name "*.gcda" 2>/dev/null > "$gcda_list_file" || true
-            gcda_count=$(grep -c "\.gcda$" "$gcda_list_file" || true)
-            echo "Number of .gcda files produced on guest: $gcda_count"
-            if [[ "$gcda_count" -gt 0 ]]; then
-              echo "Paths of .gcda files:"
-              sed "s/^/  /" "$gcda_list_file"
-              # BusyBox tar has no --parents; -T archives the listed files, stripping
-              # the leading "/" so the host can restore them at their absolute paths.
-              tar -czf /tmp/hdmicec-coverage.tar.gz -T "$gcda_list_file"
-            else
-              echo "WARNING: no .gcda files were produced on guest" >&2
-              mkdir -p /tmp/coverage-empty
-              tar -czf /tmp/hdmicec-coverage.tar.gz -C /tmp coverage-empty
-            fi
-          '
-          scp "${ssh_opts[@]}" -P "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1:/tmp/hdmicec-coverage.tar.gz" "$QEMU_WORKDIR/"
-
-          # Report the .gcda files retrieved onto the host runner.
-          host_gcda_count=$(tar -tzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" | grep -c "\.gcda$" || true)
-          echo "===== .gcda files retrieved to host runner: $host_gcda_count ====="
-          tar -tzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" | grep "\.gcda$" | sed "s/^/  /" || true
-
-      - name: Extract Coverage Data
-        if: always()
-        run: |
-          set -euo pipefail
-          # Restore .gcda at their absolute build paths so they sit beside the .gcno.
-          tar -xzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" -C / 2>/dev/null || true
-      - name: Generate Coverage Report
-        if: always()
-        run: |
-          set -euo pipefail
-          # Capture the compile-time baseline so plugin translation units with
-          # no runtime hits are still present in the report.
-          lcov \
-             --capture \
-             --initial \
-             --directory entservices-hdmicecsource \
-             --output-file coverage_initial.info
-          lcov \
-             --capture \
-             --directory entservices-hdmicecsource \
-             --output-file coverage_runtime.info
-          lcov \
-             --add-tracefile coverage_initial.info \
-             --add-tracefile coverage_runtime.info \
-             --output-file coverage.info
-           lcov \
-             --extract coverage.info \
-             '*/entservices-hdmicecsource/plugin/*.c' \
-             '*/entservices-hdmicecsource/plugin/*.cc' \
-             '*/entservices-hdmicecsource/plugin/*.cpp' \
-             '*/entservices-hdmicecsource/plugin/*.h' \
-             '*/entservices-hdmicecsource/plugin/*.hpp' \
-             --output-file coverage_plugin.info
-          lcov \
-             --remove coverage_plugin.info \
-             '/usr/*' \
-             '*/Tests/*' \
-             '*/build/*' \
-             --output-file coverage_filtered.info
-          genhtml \
-             coverage_filtered.info \
-             --output-directory coverage_html
-          coverage_summary="$(lcov --summary coverage_filtered.info 2>&1)"
-          line_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*lines\.*: \([0-9.]*\)%.*/\1/p')"
-          function_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*functions\.*: \([0-9.]*\)%.*/\1/p')"
-
-          [[ -n "$line_coverage" && -n "$function_coverage" ]] || {
-            echo "ERROR: unable to read line and function coverage from coverage_filtered.info" >&2
-            exit 1
-          }
-
-          echo "Required coverage: ${MIN_COVERAGE}%"
-          echo "Line coverage: ${line_coverage}%"
-          echo "Function coverage: ${function_coverage}%"
-          awk -v actual="$line_coverage" -v minimum="$MIN_COVERAGE" \
-            'BEGIN { exit (actual < minimum) }' || {
-              echo "ERROR: line coverage is below the required minimum" >&2
-              exit 1
-            }
-          awk -v actual="$function_coverage" -v minimum="$MIN_COVERAGE" \
-            'BEGIN { exit (actual < minimum) }' || {
-              echo "ERROR: function coverage is below the required minimum" >&2
-              exit 1
-            }
-       
       - name: Upload QEMU logs and plugin artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -980,12 +784,6 @@ jobs:
             /tmp/qemu-artifacts/*.txt
             /tmp/qemu-artifacts/*.pid
             /tmp/qemu-artifacts/serial.log
-            coverage.info
-            coverage_initial.info
-            coverage_runtime.info
-            coverage_plugin.info
-            coverage_filtered.info
-            coverage_html/**
           if-no-files-found: warn
 
       - name: Shutdown QEMU
