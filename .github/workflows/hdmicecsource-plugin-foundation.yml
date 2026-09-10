@@ -90,7 +90,7 @@ jobs:
             echo "PLUGIN_SOURCE_ROOT=$(yq -r '.copy.plugin.source_root' "$config_file")"
             echo "PLUGIN_SOURCE_PATTERN=$(yq -r '.copy.plugin.source_pattern' "$config_file")"
             echo "PLUGIN_SOURCE_FILTER=$(yq -r '.copy.plugin.source_filter' "$config_file")"
-            echo "PLUGIN_ARTIFACT_DIRECTORY=$(yq -r '.copy.plugin.artifact_directory' "$config_file")"
+            echo "PLUGIN_ARTIFACT_DIRECTORY=$plugin_artifact_dir"
             echo "PLUGIN_GUEST_DIR=$(yq -r '.copy.plugin.guest_directory' "$config_file")"
             echo "PLUGIN_STAGE_DIR=$(yq -r '.copy.plugin.stage_directory' "$config_file")"
             echo "RUNTIME_SOURCE_ROOT=$(yq -r '.copy.runtime.source_root' "$config_file")"
@@ -967,11 +967,11 @@ jobs:
           lcov \
              --capture \
              --initial \
-             --directory entservices-hdmicecsource \
+             --directory "$COMPONENT_DIR" \
              --output-file coverage_initial.info
           lcov \
              --capture \
-             --directory entservices-hdmicecsource \
+             --directory "$COMPONENT_DIR" \
              --output-file coverage_runtime.info
           lcov \
              --add-tracefile coverage_initial.info \
@@ -979,11 +979,11 @@ jobs:
              --output-file coverage.info
            lcov \
              --extract coverage.info \
-             '*/entservices-hdmicecsource/plugin/*.c' \
-             '*/entservices-hdmicecsource/plugin/*.cc' \
-             '*/entservices-hdmicecsource/plugin/*.cpp' \
-             '*/entservices-hdmicecsource/plugin/*.h' \
-             '*/entservices-hdmicecsource/plugin/*.hpp' \
+             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.c" \
+             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cc" \
+             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cpp" \
+             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.h" \
+             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.hpp" \
              --output-file coverage_plugin.info
           lcov \
              --remove coverage_plugin.info \
@@ -994,15 +994,28 @@ jobs:
           genhtml \
              coverage_filtered.info \
              --output-directory coverage_html
-          gcovr \
-             --root entservices-hdmicecsource \
-             --filter '.*entservices-hdmicecsource/plugin/.*\\.(c|cc|cpp|h|hpp)$' \
-             --exclude '.*CMakeFiles.*' \
-             --exclude '.*install/usr/include/.*' \
-             --exclude '.*Tests/.*' \
-             --fail-under-line "$MIN_COVERAGE" \
-             --html-details \
-             --html coverage_html/gcovr.html
+          coverage_summary="$(lcov --summary coverage_filtered.info 2>&1)"
+          line_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*lines\.*: \([0-9.]*\)%.*/\1/p')"
+          function_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*functions\.*: \([0-9.]*\)%.*/\1/p')"
+
+          [[ -n "$line_coverage" && -n "$function_coverage" ]] || {
+            echo "ERROR: unable to read line and function coverage from coverage_filtered.info" >&2
+            exit 1
+          }
+
+          echo "Required coverage: ${MIN_COVERAGE}%"
+          echo "Line coverage: ${line_coverage}%"
+          echo "Function coverage: ${function_coverage}%"
+          awk -v actual="$line_coverage" -v minimum="$MIN_COVERAGE" \
+            'BEGIN { exit (actual < minimum) }' || {
+              echo "ERROR: line coverage is below the required minimum" >&2
+              exit 1
+            }
+          awk -v actual="$function_coverage" -v minimum="$MIN_COVERAGE" \
+            'BEGIN { exit (actual < minimum) }' || {
+              echo "ERROR: function coverage is below the required minimum" >&2
+              exit 1
+            }
       - name: Upload QEMU logs and plugin artifacts
         if: always()
         uses: actions/upload-artifact@v4
