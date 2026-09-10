@@ -716,25 +716,28 @@ namespace WPEFramework
        {
             bool ret = false;
 
-            if(true == cecEnableStatus)
+            if(false == cecEnableStatus)
             {
-                if (smConnection){
-                   try
-                   {
-                       smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(Standby()));
-		               ret = true;
-                   }
-                   catch(...)
-                   {
-                       LOGWARN("Exception while sending CEC StandBy Message");
-                   }
-                }
-                else {
-                    LOGWARN("smConnection is NULL");
-                }
-            }
-            else
+                // CEC disabled is a valid state, not an error: report failure without a JSON-RPC error.
                 LOGWARN("cecEnableStatus=false");
+                success.success = false;
+                return Core::ERROR_NONE;
+            }
+
+            if (smConnection){
+               try
+               {
+                   smConnection->sendTo(LogicalAddress(LogicalAddress::BROADCAST), MessageEncoder().encode(Standby()));
+                   ret = true;
+               }
+               catch(...)
+               {
+                   LOGWARN("Exception while sending CEC StandBy Message");
+               }
+            }
+            else {
+                LOGWARN("smConnection is NULL");
+            }
 
             if(ret)
             {
@@ -1399,33 +1402,36 @@ namespace WPEFramework
             LOGINFO("PerformOTPAction ");
             bool ret = false; 
 
-            if((true == cecEnableStatus) && (cecOTPSettingEnabled == true))
+            if((false == cecEnableStatus) || (false == cecOTPSettingEnabled))
             {
-                if (smConnection)  {
-                    try
-                    {
-                        LOGINFO("Command: sending ImageViewOn TV \r\n");
-                        smConnection->sendTo(LogicalAddress::TV, MessageEncoder().encode(ImageViewOn()));
-                        usleep(10000);
-                        LOGINFO("Command: sending ActiveSource  physical_addr :%s \r\n",physical_addr.toString().c_str());
-                        smConnection->sendTo(LogicalAddress::BROADCAST, MessageEncoder().encode(ActiveSource(physical_addr)));
-                        usleep(10000);
-                        isDeviceActiveSource = true;
-                        LOGINFO("Command: sending GiveDevicePowerStatus \r\n");
-                        smConnection->sendTo(LogicalAddress::TV, MessageEncoder().encode(GiveDevicePowerStatus()));
-                        ret = true;
-                    }
-                    catch(...)
-                    {
-                        LOGWARN("Exception while processing PerformOTPAction");
-                    }
+                // CEC/OTP disabled is a valid state, not an error: report failure without a JSON-RPC error.
+                LOGWARN("cecEnableStatus=%d cecOTPSettingEnabled=%d", cecEnableStatus, cecOTPSettingEnabled);
+                success.success = false;
+                return Core::ERROR_NONE;
+            }
+
+            if (smConnection)  {
+                try
+                {
+                    LOGINFO("Command: sending ImageViewOn TV \r\n");
+                    smConnection->sendTo(LogicalAddress::TV, MessageEncoder().encode(ImageViewOn()));
+                    usleep(10000);
+                    LOGINFO("Command: sending ActiveSource  physical_addr :%s \r\n",physical_addr.toString().c_str());
+                    smConnection->sendTo(LogicalAddress::BROADCAST, MessageEncoder().encode(ActiveSource(physical_addr)));
+                    usleep(10000);
+                    isDeviceActiveSource = true;
+                    LOGINFO("Command: sending GiveDevicePowerStatus \r\n");
+                    smConnection->sendTo(LogicalAddress::TV, MessageEncoder().encode(GiveDevicePowerStatus()));
+                    ret = true;
                 }
-                else {
-                    LOGWARN("smConnection is NULL");
+                catch(...)
+                {
+                    LOGWARN("Exception while processing PerformOTPAction");
                 }
             }
-            else
-                LOGWARN("cecEnableStatus=false");
+            else {
+                LOGWARN("smConnection is NULL");
+            }
 
             if (ret){
                 success.success = true;
