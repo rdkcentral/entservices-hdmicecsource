@@ -58,8 +58,16 @@ jobs:
       - name: Load build framework configuration
         run: |
           set -euo pipefail
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends yq
+          # apt's "yq" package (if present) is an unrelated jq wrapper; install
+          # the real mikefarah/yq binary directly so `-r` semantics match.
+          if ! command -v yq >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates
+            YQ_VERSION="v4.44.3"
+            curl -fsSL -o /usr/local/bin/yq \
+              "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+            chmod +x /usr/local/bin/yq
+          fi
 
           config_file="$GITHUB_WORKSPACE/build-framework/build-config.yml"
           [[ -f "$config_file" ]] || { echo "ERROR: missing build config: $config_file" >&2; exit 1; }
