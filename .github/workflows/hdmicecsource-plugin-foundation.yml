@@ -75,7 +75,7 @@ jobs:
       - name: Build dependency stack
         working-directory: entservices-hdmicecsource
         run: |
-          bash -x build_dependencies.sh
+          bash -x build_dependencies_l3.sh
 
       - name: Build HDMI CEC Source plugin
         working-directory: entservices-hdmicecsource
