@@ -1,0 +1,40 @@
+# Component-specific inputs for the generic build framework.
+# Copy this file for another component and change only these values.
+version: 1
+
+component:
+  name: HDMI CEC Source
+  source_repo: rdkcentral/entservices-hdmicecsource
+  source_directory: component-source
+  image_asset_name: DefaultImage.tar.gz
+  plugin_callsign: org.rdk.HdmiCecSource
+
+execution:
+  dependency_script: build_dependencies_l3.sh
+  build_script: cov_build_l3.sh
+  tests_branch: qemu
+  tests_directory: Tests/vDeviceTests
+  test_entrypoint: SuitManager.py
+
+copy:
+  plugin:
+    source_root: install
+    source_pattern: '*.so'
+    source_filter: /plugins/
+    artifact_directory: artifacts/plugins
+    guest_directory: /usr/lib/wpeframework/plugins
+    stage_directory: plugins
+    require_needed_match: true
+  runtime:
+    source_root: install/usr/lib
+    source_pattern: '*.so*'
+    source_filter: ''
+    artifact_directory: artifacts/runtime-libs
+    guest_directory: /usr/lib
+    stage_directory: runtime
+    deploy: true
+
+coverage:
+  minimum_line_percent: 80
+  source_directory: plugin
+  source_extensions: 'c|cc|cpp|h|hpp'
