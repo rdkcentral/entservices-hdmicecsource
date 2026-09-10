@@ -683,7 +683,7 @@ jobs:
 
           # ---- Step 3: host-side comparison: new vs old local build ----
           echo "===== HOST: new plugin binary info ====="
-          for sofile in entservices-hdmicecsource/artifacts/plugins/*.so; do
+          for sofile in "$PLUGIN_ARTIFACT_DIRECTORY"/*.so; do
             [[ -f "$sofile" ]] || continue
             fname="$(basename "$sofile")"
             echo "--- $fname ---"
