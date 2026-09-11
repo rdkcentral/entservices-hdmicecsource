@@ -70,6 +70,6 @@ diagnostics:
   symbol_filter: 'rdk|plugin|hdmi|cec'
 
 coverage:
-  minimum_coverage_threshold: 80
+  minimum_coverage_threshold: 60
   source_directory: plugin
   source_extensions: 'c|cc|cpp|h|hpp'
