@@ -90,12 +90,12 @@ jobs:
             echo "PLUGIN_SOURCE_ROOT=$(yq -r '.copy.plugin.source_root' "$config_file")"
             echo "PLUGIN_SOURCE_PATTERN=$(yq -r '.copy.plugin.source_pattern' "$config_file")"
             echo "PLUGIN_SOURCE_FILTER=$(yq -r '.copy.plugin.source_filter' "$config_file")"
-            echo "PLUGIN_ARTIFACT_DIRECTORY=$(yq -r '.copy.plugin.artifact_directory' "$config_file")"
+            echo "PLUGIN_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.plugin.artifact_directory' "$config_file")"
             echo "PLUGIN_GUEST_DIR=$(yq -r '.copy.plugin.guest_directory' "$config_file")"
             echo "PLUGIN_STAGE_DIR=$(yq -r '.copy.plugin.stage_directory' "$config_file")"
             echo "RUNTIME_SOURCE_ROOT=$(yq -r '.copy.runtime.source_root' "$config_file")"
             echo "RUNTIME_SOURCE_PATTERN=$(yq -r '.copy.runtime.source_pattern' "$config_file")"
-            echo "RUNTIME_ARTIFACT_DIRECTORY=$(yq -r '.copy.runtime.artifact_directory' "$config_file")"
+            echo "RUNTIME_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.runtime.artifact_directory' "$config_file")"
             echo "RUNTIME_GUEST_DIR=$(yq -r '.copy.runtime.guest_directory' "$config_file")"
             echo "RUNTIME_STAGE_DIR=$(yq -r '.copy.runtime.stage_directory' "$config_file")"
             echo "DEPLOY_RUNTIME_LIBS=$(yq -r '.copy.runtime.deploy' "$config_file")"
@@ -403,16 +403,30 @@ jobs:
           selected_ssh_user="${QEMU_SSH_USER:-root}"
           guest_stage_dir="/tmp/hdmicecsource-ci"
 
+          # Artifact collection runs from the component checkout, while this
+          # step runs from the workspace root. Normalize configured relative
+          # paths here so the copy step always reads the collected artifacts.
+          if [[ "$PLUGIN_ARTIFACT_DIRECTORY" = /* ]]; then
+            plugin_artifact_directory="$PLUGIN_ARTIFACT_DIRECTORY"
+          else
+            plugin_artifact_directory="$GITHUB_WORKSPACE/$COMPONENT_DIR/$PLUGIN_ARTIFACT_DIRECTORY"
+          fi
+          if [[ "$RUNTIME_ARTIFACT_DIRECTORY" = /* ]]; then
+            runtime_artifact_directory="$RUNTIME_ARTIFACT_DIRECTORY"
+          else
+            runtime_artifact_directory="$GITHUB_WORKSPACE/$COMPONENT_DIR/$RUNTIME_ARTIFACT_DIRECTORY"
+          fi
+
           ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
           ssh_key_arg=()
 
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
             "rm -rf '$guest_stage_dir' && mkdir -p '$guest_stage_dir/$PLUGIN_STAGE_DIR' '$guest_stage_dir/$RUNTIME_STAGE_DIR' '$guest_stage_dir/gcno'"
 
-          plugin_files=("$PLUGIN_ARTIFACT_DIRECTORY"/*.so)
+          plugin_files=("$plugin_artifact_directory"/*.so)
           if [[ ! -e "${plugin_files[0]}" ]]; then
-            echo "ERROR: No plugin artifacts found at $PLUGIN_ARTIFACT_DIRECTORY/*.so" >&2
-            ls -lah "$PLUGIN_ARTIFACT_DIRECTORY"/ 2>/dev/null || true
+            echo "ERROR: No plugin artifacts found at $plugin_artifact_directory/*.so" >&2
+            ls -lah "$plugin_artifact_directory"/ 2>/dev/null || true
             exit 1
           fi
 
@@ -553,7 +567,7 @@ jobs:
           # Copy runtime shared libraries needed by plugin loading (filtered to avoid framework conflicts).
           runtime_lib_count=0
           if [[ "${DEPLOY_RUNTIME_LIBS:-false}" == "true" ]]; then
-            for sofile in "$RUNTIME_ARTIFACT_DIRECTORY"/*.so*; do
+            for sofile in "$runtime_artifact_directory"/*.so*; do
               [[ -f "$sofile" ]] || continue
               runtime_lib_count=$((runtime_lib_count + 1))
               copied=false
