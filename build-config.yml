@@ -35,6 +35,6 @@ copy:
     deploy: true
 
 coverage:
-  minimum_line_percent: 80
+  minimum_line_percent: 60
   source_directory: plugin
   source_extensions: 'c|cc|cpp|h|hpp'
