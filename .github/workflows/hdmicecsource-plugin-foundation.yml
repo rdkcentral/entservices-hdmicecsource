@@ -927,9 +927,10 @@ jobs:
           echo "===== Flushing coverage: deactivate plugin and stop WPEFramework ====="
           ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
             set -uo pipefail
+            plugin_callsign="'"$PLUGIN_CALLSIGN"'"
             curl -sS --connect-timeout 5 --max-time 10 \
               -H "Content-Type: application/json" \
-              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.deactivate\",\"params\":{\"callsign\":\"$PLUGIN_CALLSIGN\"}}" \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.deactivate\",\"params\":{\"callsign\":\"$plugin_callsign\"}}" \
               http://127.0.0.1:9998/jsonrpc 2>&1 || true
             echo
             sleep 3
