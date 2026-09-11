@@ -30,7 +30,7 @@ copy:
     guest_directory: /usr/lib/wpeframework/plugins
     stage_directory: plugins
     require_needed_match: true
-    # Plugin shared objects deployed to (and diagnosed on) the guest image.
+    # Plugin shared objects deployed to the guest image.
     libraries:
       - libWPEFrameworkHdmiCecSource.so
       - libWPEFrameworkHdmiCecSourceImplementation.so
