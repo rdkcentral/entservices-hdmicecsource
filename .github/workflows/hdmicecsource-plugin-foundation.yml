@@ -78,6 +78,7 @@ jobs:
 
           {
             echo "COMPONENT_NAME=$(yq -r '.component.name' "$config_file")"
+            echo "COMPONENT_SLUG=$(yq -r '.component.slug' "$config_file")"
             echo "SOURCE_REPO=$(yq -r '.component.source_repo' "$config_file")"
             echo "COMPONENT_DIR=$(yq -r '.component.source_directory' "$config_file")"
             echo "GITHUB_IMAGE_ASSET_NAME=$(yq -r '.component.image_asset_name' "$config_file")"
@@ -87,20 +88,28 @@ jobs:
             echo "TESTS_BRANCH=$(yq -r '.execution.tests_branch' "$config_file")"
             echo "TESTS_DIRECTORY=$(yq -r '.execution.tests_directory' "$config_file")"
             echo "TEST_ENTRYPOINT=$(yq -r '.execution.test_entrypoint' "$config_file")"
+            echo "TEST_ENVIRONMENT=$(yq -r '.execution.test_environment // {} | to_entries | .[] | "\(.key)=\(.value)"' "$config_file" | tr '\n' ' ')"
             echo "PLUGIN_SOURCE_ROOT=$(yq -r '.copy.plugin.source_root' "$config_file")"
             echo "PLUGIN_SOURCE_PATTERN=$(yq -r '.copy.plugin.source_pattern' "$config_file")"
             echo "PLUGIN_SOURCE_FILTER=$(yq -r '.copy.plugin.source_filter' "$config_file")"
             echo "PLUGIN_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.plugin.artifact_directory' "$config_file")"
             echo "PLUGIN_GUEST_DIR=$(yq -r '.copy.plugin.guest_directory' "$config_file")"
             echo "PLUGIN_STAGE_DIR=$(yq -r '.copy.plugin.stage_directory' "$config_file")"
+            # Space-separated lists; shared-object names never contain spaces.
+            echo "PLUGIN_LIBRARIES=$(yq -r '.copy.plugin.libraries[]' "$config_file" | tr '\n' ' ')"
+            echo "PLUGIN_GUEST_GLOB=$(yq -r '.copy.plugin.guest_glob' "$config_file")"
             echo "RUNTIME_SOURCE_ROOT=$(yq -r '.copy.runtime.source_root' "$config_file")"
             echo "RUNTIME_SOURCE_PATTERN=$(yq -r '.copy.runtime.source_pattern' "$config_file")"
             echo "RUNTIME_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.runtime.artifact_directory' "$config_file")"
             echo "RUNTIME_GUEST_DIR=$(yq -r '.copy.runtime.guest_directory' "$config_file")"
             echo "RUNTIME_STAGE_DIR=$(yq -r '.copy.runtime.stage_directory' "$config_file")"
+            echo "RUNTIME_EXCLUDE_PATTERNS=$(yq -r '.copy.runtime.exclude_patterns[]' "$config_file" | tr '\n' ' ')"
+            echo "RUNTIME_FORBIDDEN_PATTERNS=$(yq -r '.copy.runtime.forbidden_patterns[]' "$config_file" | tr '\n' ' ')"
+            echo "RUNTIME_GUEST_PROBE_PREFIXES=$(yq -r '.copy.runtime.guest_probe_prefixes[]' "$config_file" | tr '\n' ' ')"
             echo "DEPLOY_RUNTIME_LIBS=$(yq -r '.copy.runtime.deploy' "$config_file")"
             echo "REQUIRE_NEEDED_MATCH=$(yq -r '.copy.plugin.require_needed_match' "$config_file")"
-            echo "MIN_COVERAGE=$(yq -r '.coverage.minimum_line_percent' "$config_file")"
+            echo "DIAGNOSTIC_SYMBOL_FILTER=$(yq -r '.diagnostics.symbol_filter' "$config_file")"
+            echo "MIN_COVERAGE=$(yq -r '.coverage.minimum_coverage_threshold' "$config_file")"
             echo "COVERAGE_SOURCE_DIRECTORY=$(yq -r '.coverage.source_directory' "$config_file")"
             echo "COVERAGE_EXTENSIONS=$(yq -r '.coverage.source_extensions' "$config_file")"
           } >> "$GITHUB_ENV"
@@ -158,25 +167,33 @@ jobs:
           }
 
           # Collect runtime libraries that plugin may need at load time.
-          # DS test stubs are statically linked into the implementation plugin;
-          # never deploy DS shared libraries even if a future build produces them.
-          # Exclude ALL libWPEFramework* libs — they are already in the QEMU image and
-          # deploying any version from this build causes ABI mismatch SEGV on restart.
+          # Patterns from copy.runtime.exclude_patterns are never deployed: they
+          # already exist in the guest image and deploying this build's copies
+          # causes ABI mismatch crashes on restart.
+          runtime_exclude_args=()
+          for pattern in $RUNTIME_EXCLUDE_PATTERNS; do
+            runtime_exclude_args+=( ! -name "$pattern" )
+          done
+
           find "$RUNTIME_SOURCE_ROOT" -maxdepth 1 \( -type f -o -type l \) -name "$RUNTIME_SOURCE_PATTERN" \
-            ! -name 'libWPEFramework*' \
-            ! -name 'libds.so*' \
-            ! -name 'libdshal.so*' \
-            ! -name 'libdshalcli.so*' \
-            | grep -v '/plugins/' | tee "$RUNTIME_ARTIFACT_DIRECTORY/so-list.txt" || true
+            "${runtime_exclude_args[@]}" \
+            | grep -v -e "${PLUGIN_SOURCE_FILTER:-^$}" | tee "$RUNTIME_ARTIFACT_DIRECTORY/so-list.txt" || true
           while IFS= read -r sofile; do
             [[ -n "$sofile" ]] || continue
             cp -f "$sofile" "$RUNTIME_ARTIFACT_DIRECTORY/"
           done < "$RUNTIME_ARTIFACT_DIRECTORY/so-list.txt"
 
-          if find "$RUNTIME_ARTIFACT_DIRECTORY" -maxdepth 1 -type f \
-              \( -name 'libds.so*' -o -name 'libdshal.so*' -o -name 'libdshalcli.so*' \) \
+          runtime_forbidden_args=()
+          for pattern in $RUNTIME_FORBIDDEN_PATTERNS; do
+            [[ ${#runtime_forbidden_args[@]} -eq 0 ]] || runtime_forbidden_args+=( -o )
+            runtime_forbidden_args+=( -name "$pattern" )
+          done
+
+          if [[ ${#runtime_forbidden_args[@]} -gt 0 ]] && \
+             find "$RUNTIME_ARTIFACT_DIRECTORY" -maxdepth 1 -type f \
+              \( "${runtime_forbidden_args[@]}" \) \
               -print -quit | grep -q .; then
-            echo "ERROR: DS runtime library entered deployment artifacts" >&2
+            echo "ERROR: excluded runtime library entered deployment artifacts" >&2
             exit 1
           fi
 
@@ -401,7 +418,7 @@ jobs:
 
           selected_ssh_port="${QEMU_SSH_PORT:-$SSH_HOST_PORT}"
           selected_ssh_user="${QEMU_SSH_USER:-root}"
-          guest_stage_dir="/tmp/hdmicecsource-ci"
+          guest_stage_dir="/tmp/${COMPONENT_SLUG}-ci"
 
           # Artifact collection runs from the component checkout, while this
           # step runs from the workspace root. Normalize configured relative
@@ -477,10 +494,10 @@ jobs:
             echo "Copied $gcno_count .gcno files (archived) to guest staging area"
           fi
 
-          # ---- Check what DS/CEC/IARM libs the guest already ships ----
+          # ---- Check what component-related libs the guest already ships ----
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            echo "===== Guest-native DS/CEC/IARM libraries ====="
-            for pat in libds libdshalcli libRCEC libRCECHal libRCECOSHal libIARMBus libtelemetry; do
+            echo "===== Guest-native component libraries ====="
+            for pat in '"$RUNTIME_GUEST_PROBE_PREFIXES"'; do
               found=$(find /usr/lib /lib -maxdepth 2 -name "${pat}*" 2>/dev/null)
               if [ -n "$found" ]; then
                 echo "$found" | while read -r f; do ls -lh "$f"; done
@@ -603,7 +620,7 @@ jobs:
           fi
 
           # ---- Set RDK_PROFILE before activation probes ----
-          # HdmiCecSource.Initialize() rejects profiles other than STB.
+          # Plugin Initialize() rejects profiles other than STB.
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
             set -eu
             if [ -f /etc/device.properties ]; then
@@ -624,18 +641,21 @@ jobs:
           echo "===== POST-DEPLOY: checking plugin activation state ====="
           old_plugin_ok=false
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
+            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
             echo "===== Plugin files ====="
-            ls -lh /usr/lib/wpeframework/plugins/*HdmiCec* 2>/dev/null || echo "MISSING old plugin"
-            echo "===== Plugin ldd ====="
-            ldd /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null || true
-            echo "===== Plugin readelf NEEDED ====="
-            readelf -d /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null | grep NEEDED || true
-            echo "===== Plugin exported symbols ====="
-            nm -D /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null | grep -E " T " | grep -iE "rdk|plugin|hdmi|cec" | head -n 20 || true
+            ls -lh "$plugin_dir"/'"$PLUGIN_GUEST_GLOB"' 2>/dev/null || echo "MISSING old plugin"
+            for lib in '"$PLUGIN_LIBRARIES"'; do
+              echo "===== $lib ldd ====="
+              ldd "$plugin_dir/$lib" 2>/dev/null || true
+              echo "===== $lib readelf NEEDED ====="
+              readelf -d "$plugin_dir/$lib" 2>/dev/null | grep NEEDED || true
+              echo "===== $lib exported symbols ====="
+              nm -D "$plugin_dir/$lib" 2>/dev/null | grep -E " T " | grep -iE "'"$DIAGNOSTIC_SYMBOL_FILTER"'" | head -n 20 || true
+            done
             echo "===== Activation attempt ====="
             curl -sS --connect-timeout 5 --max-time 10 \
               -H "Content-Type: application/json" \
-              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"$PLUGIN_CALLSIGN\"}}" \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"'"$PLUGIN_CALLSIGN"'\"}}" \
               http://127.0.0.1:9998/jsonrpc 2>&1 || true
           ' > "$QEMU_WORKDIR/baseline-old-plugin.log" 2>&1 || true
           cat "$QEMU_WORKDIR/baseline-old-plugin.log"
@@ -648,11 +668,12 @@ jobs:
             # and undefined symbols in the Implementation .so are the usual culprit.
             echo "===== DIAGNOSING ERROR_OPENING_FAILED ====="
             ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
+              plugin_dir="'"$PLUGIN_GUEST_DIR"'"
               echo "----- WPEFramework journal (dlopen/load errors) -----"
               journalctl -u WPEFramework -u wpeframework -n 200 --no-pager 2>/dev/null \
-                | grep -iE "hdmicec|dlopen|dlerror|undefined|cannot open|symbol|error opening|failed to load" | tail -n 60 || true
-              for so in /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so \
-                        /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSourceImplementation.so; do
+                | grep -iE "'"$DIAGNOSTIC_SYMBOL_FILTER"'|dlopen|dlerror|undefined|cannot open|symbol|error opening|failed to load" | tail -n 60 || true
+              for lib in '"$PLUGIN_LIBRARIES"'; do
+                so="$plugin_dir/$lib"
                 echo "----- $so : unresolved NEEDED (ldd) -----"
                 ldd "$so" 2>/dev/null | grep -i "not found" || echo "  (all NEEDED resolved)"
                 echo "----- $so : undefined symbols (nm -D U) -----"
@@ -684,8 +705,9 @@ jobs:
 
           # ---- Step 2: preserve rollback backup if missing ----
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            for pso in /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so \
-                       /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSourceImplementation.so; do
+            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
+            for lib in '"$PLUGIN_LIBRARIES"'; do
+              pso="$plugin_dir/$lib"
               if [[ -f "$pso" && ! -f "${pso}.bak" ]]; then
                 cp -f "$pso" "${pso}.bak"
                 echo "Backed up: $pso -> ${pso}.bak"
@@ -704,24 +726,25 @@ jobs:
             file "$sofile"
             ldd "$sofile" 2>/dev/null || echo "ldd not available on host or cross-compiled"
             readelf -d "$sofile" 2>/dev/null | grep NEEDED || true
-            nm -D "$sofile" 2>/dev/null | grep -E " T " | grep -iE "rdk|plugin|hdmi|cec" | head -n 20 || true
+            nm -D "$sofile" 2>/dev/null | grep -E " T " | grep -iE "$DIAGNOSTIC_SYMBOL_FILTER" | head -n 20 || true
           done | tee "$QEMU_WORKDIR/new-plugin-host-info.log"
 
           # ---- Step 4: refresh linker cache and compare on guest ----
           ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
+            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
             command -v ldconfig >/dev/null 2>&1 && ldconfig || true
 
             echo "===== NEW plugin files after copy ====="
-            ls -lh /usr/lib/wpeframework/plugins/*HdmiCec* 2>/dev/null || true
-            echo "===== required runtime libs ====="
-            ls -lh /usr/lib/libWPEFrameworkPlugins.so* 2>/dev/null || echo "MISSING: /usr/lib/libWPEFrameworkPlugins.so*"
-            echo "===== NEW plugin ldd ====="
-            ldd /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null || true
-            ldd /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSourceImplementation.so 2>/dev/null || true
-            echo "===== NEW plugin readelf NEEDED ====="
-            readelf -d /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null | grep NEEDED || true
-            echo "===== MISSING SYMBOLS (undefined) ====="
-            nm -D /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so 2>/dev/null | grep " U " | head -n 40 || true
+            ls -lh "$plugin_dir"/'"$PLUGIN_GUEST_GLOB"' 2>/dev/null || true
+            for lib in '"$PLUGIN_LIBRARIES"'; do
+              so="$plugin_dir/$lib"
+              echo "===== NEW $lib ldd ====="
+              ldd "$so" 2>/dev/null || true
+              echo "===== NEW $lib readelf NEEDED ====="
+              readelf -d "$so" 2>/dev/null | grep NEEDED || true
+              echo "===== NEW $lib MISSING SYMBOLS (undefined) ====="
+              nm -D "$so" 2>/dev/null | grep " U " | head -n 40 || true
+            done
             echo "===== WPEFramework version ====="
             WPEFramework --version 2>/dev/null || dpkg -l | grep -i wpe 2>/dev/null | head -n 5 || true
           ' > "$QEMU_WORKDIR/postcopy-plugin-compare.log" 2>&1 || true
@@ -733,7 +756,7 @@ jobs:
 
           activate_result="$(ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
             'curl -sS --connect-timeout 5 --max-time 10 -H "Content-Type: application/json" \
-             --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"$PLUGIN_CALLSIGN\"}}" \
+             --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"'"$PLUGIN_CALLSIGN"'\"}}" \
              http://127.0.0.1:9998/jsonrpc 2>&1 || true')"
 
           echo "New plugin activation probe: $activate_result"
@@ -741,8 +764,9 @@ jobs:
           if echo "$activate_result" | grep -q 'ERROR_OPENING_FAILED'; then
             echo "NOTICE: New plugin has unresolved dependencies in this image — reverting to old plugin for test run" | tee "$QEMU_WORKDIR/plugin-fallback.log"
             ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-              for pso in /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSource.so \
-                         /usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSourceImplementation.so; do
+              plugin_dir="'"$PLUGIN_GUEST_DIR"'"
+              for lib in '"$PLUGIN_LIBRARIES"'; do
+                pso="$plugin_dir/$lib"
                 if [[ -f "${pso}.bak" ]]; then
                   cp -f "${pso}.bak" "$pso"
                   echo "Restored: ${pso}.bak -> $pso"
@@ -785,8 +809,8 @@ jobs:
             ss -ltnp 2>/dev/null | grep -E ":9998|:8080" || netstat -ltnp 2>/dev/null | grep -E ":9998|:8080" || true
             echo "===== recent WPEFramework journal ====="
             journalctl -u WPEFramework -u wpeframework -n 80 --no-pager 2>/dev/null || true
-            echo "===== HdmiCecSource plugin files ====="
-            ls -lh /usr/lib/wpeframework/plugins/*HdmiCec* 2>/dev/null || echo "MISSING: no HdmiCec plugins found"
+            echo "===== component plugin files ====="
+            ls -lh "'"$PLUGIN_GUEST_DIR"'"/'"$PLUGIN_GUEST_GLOB"' 2>/dev/null || echo "MISSING: no component plugins found"
             echo "===== JSON-RPC probe ====="
             curl -sS --connect-timeout 3 --max-time 8 \
               -H "Content-Type: application/json" \
@@ -796,7 +820,7 @@ jobs:
           echo "Pre-test diagnostics saved to $QEMU_WORKDIR/pretest-wpeframework.log"
           cat "$QEMU_WORKDIR/pretest-wpeframework.log"
 
-      - name: Validate HDMI CEC vDevice testcases
+      - name: Validate configured vDevice testcases
         run: |
           set -euo pipefail
 
@@ -887,14 +911,14 @@ jobs:
             exit 1
           fi
 
-          # Explicitly activate HdmiCecSource before running SuitManager.
+          # Explicitly activate the configured plugin before running the test entrypoint.
           activate_result="$(curl -sS --connect-timeout 5 --max-time 10 \
             -H "Content-Type: application/json" \
             --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"$PLUGIN_CALLSIGN\"}}" \
             "http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc" 2>&1 || true)"
           echo "Activation result (tunnel): $activate_result"
           if echo "$activate_result" | grep -q 'ERROR_'; then
-            echo "ERROR: org.rdk.HdmiCecSource activation failed before tests" >&2
+            echo "ERROR: $PLUGIN_CALLSIGN activation failed before tests" >&2
             exit 1
           fi
 
@@ -902,7 +926,9 @@ jobs:
           export JSONRPC_PORT="$JSONRPC_TUNNEL_PORT"
           export VCOMPONENT_PORT="$VCOMPONENT_TUNNEL_PORT"
           export WPEFRAMEWORK_JSONRPC_URL="http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc"
-          export HDMICEC_AUTO_COVERAGE=0
+          for entry in $TEST_ENVIRONMENT; do
+            export "$entry"
+          done
 
           cd "$tests_dir"
           python3 "$TEST_ENTRYPOINT" | tee "$QEMU_WORKDIR/vdevice-tests.log"
@@ -943,6 +969,7 @@ jobs:
           # Locate the .gcda files produced by the test run, report count and paths, then archive.
           ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
             set -euo pipefail
+            coverage_archive="/tmp/'"$COMPONENT_SLUG"'-coverage.tar.gz"
             echo "===== Searching for .gcda files produced during the test run ====="
             gcda_list_file=/tmp/gcda-files.txt
             find / -type f -name "*.gcda" 2>/dev/null > "$gcda_list_file" || true
@@ -953,26 +980,26 @@ jobs:
               sed "s/^/  /" "$gcda_list_file"
               # BusyBox tar has no --parents; -T archives the listed files, stripping
               # the leading "/" so the host can restore them at their absolute paths.
-              tar -czf /tmp/hdmicec-coverage.tar.gz -T "$gcda_list_file"
+              tar -czf "$coverage_archive" -T "$gcda_list_file"
             else
               echo "WARNING: no .gcda files were produced on guest" >&2
               mkdir -p /tmp/coverage-empty
-              tar -czf /tmp/hdmicec-coverage.tar.gz -C /tmp coverage-empty
+              tar -czf "$coverage_archive" -C /tmp coverage-empty
             fi
           '
-          scp "${ssh_opts[@]}" -P "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1:/tmp/hdmicec-coverage.tar.gz" "$QEMU_WORKDIR/"
+          scp "${ssh_opts[@]}" -P "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1:/tmp/${COMPONENT_SLUG}-coverage.tar.gz" "$QEMU_WORKDIR/"
 
           # Report the .gcda files retrieved onto the host runner.
-          host_gcda_count=$(tar -tzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" | grep -c "\.gcda$" || true)
+          host_gcda_count=$(tar -tzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" | grep -c "\.gcda$" || true)
           echo "===== .gcda files retrieved to host runner: $host_gcda_count ====="
-          tar -tzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" | grep "\.gcda$" | sed "s/^/  /" || true
+          tar -tzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" | grep "\.gcda$" | sed "s/^/  /" || true
 
       - name: Extract Coverage Data
         if: always()
         run: |
           set -euo pipefail
           # Restore .gcda at their absolute build paths so they sit beside the .gcno.
-          tar -xzf "$QEMU_WORKDIR/hdmicec-coverage.tar.gz" -C / 2>/dev/null || true
+          tar -xzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" -C / 2>/dev/null || true
       - name: Generate Coverage Report
         if: always()
         run: |
@@ -988,11 +1015,16 @@ jobs:
              --capture \
              --directory "$COMPONENT_DIR" \
              --output-file coverage_runtime.info
+          if grep -q '^SF:' coverage_runtime.info; then
+            lcov \
+               --add-tracefile coverage_initial.info \
+               --add-tracefile coverage_runtime.info \
+               --output-file coverage.info
+          else
+            echo "WARNING: runtime coverage contains no source records; using the zero-hit baseline" >&2
+            cp coverage_initial.info coverage.info
+          fi
           lcov \
-             --add-tracefile coverage_initial.info \
-             --add-tracefile coverage_runtime.info \
-             --output-file coverage.info
-           lcov \
              --extract coverage.info \
              "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.c" \
              "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cc" \
@@ -1035,7 +1067,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-hdmicecsource-build-and-tests-${{ github.run_id }}
+          name: qemu-${{ env.COMPONENT_SLUG }}-build-and-tests-${{ github.run_id }}
           path: |
             "$PLUGIN_ARTIFACT_DIRECTORY"/**
             "$RUNTIME_ARTIFACT_DIRECTORY"/**

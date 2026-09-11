@@ -4,6 +4,8 @@ version: 1
 
 component:
   name: HDMI CEC Source
+  # Lowercase identifier used for guest staging dirs, tar names and artifact names.
+  slug: hdmicecsource
   source_repo: rdkcentral/entservices-hdmicecsource
   source_directory: component-source
   image_asset_name: DefaultImage.tar.gz
@@ -15,6 +17,9 @@ execution:
   tests_branch: qemu
   tests_directory: Tests/vDeviceTests
   test_entrypoint: SuitManager.py
+  # Extra environment exported for the test entrypoint (KEY: value).
+  test_environment:
+    HDMICEC_AUTO_COVERAGE: '0'
 
 copy:
   plugin:
@@ -25,6 +30,12 @@ copy:
     guest_directory: /usr/lib/wpeframework/plugins
     stage_directory: plugins
     require_needed_match: true
+    # Plugin shared objects deployed to (and diagnosed on) the guest image.
+    libraries:
+      - libWPEFrameworkHdmiCecSource.so
+      - libWPEFrameworkHdmiCecSourceImplementation.so
+    # Glob used when listing the component's plugin files already on the guest.
+    guest_glob: '*HdmiCec*'
   runtime:
     source_root: install/usr/lib
     source_pattern: '*.so*'
@@ -33,8 +44,32 @@ copy:
     guest_directory: /usr/lib
     stage_directory: runtime
     deploy: true
+    # Never deploy these; they exist in the guest image and cause ABI mismatches.
+    exclude_patterns:
+      - 'libWPEFramework*'
+      - 'libds.so*'
+      - 'libdshal.so*'
+      - 'libdshalcli.so*'
+    # Deployment is aborted if any of these end up in the artifact directory.
+    forbidden_patterns:
+      - 'libds.so*'
+      - 'libdshal.so*'
+      - 'libdshalcli.so*'
+    # Name prefixes listed from the guest image for diagnostics only.
+    guest_probe_prefixes:
+      - libds
+      - libdshalcli
+      - libRCEC
+      - libRCECHal
+      - libRCECOSHal
+      - libIARMBus
+      - libtelemetry
+
+diagnostics:
+  # Extended-regex filter applied to exported symbol listings in diagnostics.
+  symbol_filter: 'rdk|plugin|hdmi|cec'
 
 coverage:
-  minimum_line_percent: 60
+  minimum_coverage_threshold: 80
   source_directory: plugin
   source_extensions: 'c|cc|cpp|h|hpp'
