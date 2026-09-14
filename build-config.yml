@@ -7,7 +7,7 @@ component:
   # Lowercase identifier used for guest staging dirs, tar names and artifact names.
   slug: hdmicecsource
   source_repo: rdkcentral/entservices-hdmicecsource
-  source_directory: component-source
+  source_directory: entservices-hdmicecsource
   image_asset_name: DefaultImage.tar.gz
   plugin_callsign: org.rdk.HdmiCecSource
 
