@@ -250,7 +250,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$QEMU_WORKDIR"
-          image_tar="$QEMU_WORKDIR/DefaultImage.tar.gz"
+          image_tar="$QEMU_WORKDIR/$GITHUB_IMAGE_ASSET_NAME"
           extract_dir="$QEMU_WORKDIR/image"
           image_repo="$SOURCE_REPO"
           repo_image_tar="$GITHUB_WORKSPACE/$COMPONENT_DIR/$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME"
