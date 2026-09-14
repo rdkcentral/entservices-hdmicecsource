@@ -1069,8 +1069,8 @@ jobs:
         with:
           name: qemu-${{ env.COMPONENT_SLUG }}-build-and-tests-${{ github.run_id }}
           path: |
-            "$PLUGIN_ARTIFACT_DIRECTORY"/**
-            "$RUNTIME_ARTIFACT_DIRECTORY"/**
+            ${{ env.PLUGIN_ARTIFACT_DIRECTORY }}/**
+            ${{ env.RUNTIME_ARTIFACT_DIRECTORY }}/**
             /tmp/qemu-artifacts/*.log
             /tmp/qemu-artifacts/*.txt
             /tmp/qemu-artifacts/*.pid
