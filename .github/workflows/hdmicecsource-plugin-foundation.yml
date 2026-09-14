@@ -266,7 +266,7 @@ jobs:
             fallback_repo_dir="$QEMU_WORKDIR/fallback-repo"
             rm -rf "$fallback_repo_dir"
 
-            if git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" "https://github.com/${image_repo}.git" "$fallback_repo_dir"; then
+            if git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" "https://github.com/${image_repo}.git" "$fallback_repo_dir";
               if command -v git-lfs >/dev/null 2>&1; then
                 (
                   cd "$fallback_repo_dir"
