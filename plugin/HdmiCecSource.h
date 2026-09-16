@@ -172,6 +172,7 @@ namespace WPEFramework {
 
             private:
                 void Deactivated(RPC::IRemoteConnection* connection);
+                uint32_t SetOSDNameJson(const Core::JSON::VariantContainer& parameters, Core::JSON::VariantContainer& response);
 
             private:
                 PluginHost::IShell* _service{};
