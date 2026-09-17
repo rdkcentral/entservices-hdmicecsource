@@ -121,15 +121,6 @@ jobs:
           ref: ${{ inputs.source_ref || (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number)) || github.ref_name }}
           path: ${{ env.COMPONENT_DIR }}
 
-      - name: Clone configured test branch
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" \
-            "https://github.com/${SOURCE_REPO}.git" \
-            /tmp/qemu-tests-branch
-          echo "$TESTS_BRANCH branch $TESTS_DIRECTORY contents:"
-          ls "/tmp/qemu-tests-branch/$TESTS_DIRECTORY/"
-
       - name: Build dependency stack
         working-directory: ${{ env.COMPONENT_DIR }}
         run: |
@@ -142,6 +133,15 @@ jobs:
           export CXXFLAGS="${CXXFLAGS:-} --coverage"
           export LDFLAGS="${LDFLAGS:-} --coverage"
           bash -x "$BUILD_SCRIPT"
+
+      - name: Clone configured test branch
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" \
+            "https://github.com/${SOURCE_REPO}.git" \
+            /tmp/qemu-tests-branch
+          echo "$TESTS_BRANCH branch $TESTS_DIRECTORY contents:"
+          ls "/tmp/qemu-tests-branch/$TESTS_DIRECTORY/"
 
       - name: Collect configured artifacts
         id: plugin
