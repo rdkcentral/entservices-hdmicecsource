@@ -9,8 +9,6 @@ component:
   source_repo: rdkcentral/entservices-hdmicecsource
   source_directory: entservices-hdmicecsource
   image_asset_name: DefaultImage.tar.gz
-  # Name of the manually uploaded GitHub Actions artifact containing image_asset_name.
-  image_artifact_name: qemu_images
   plugin_callsign: org.rdk.HdmiCecSource
 
 execution:

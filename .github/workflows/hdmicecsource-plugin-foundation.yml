@@ -82,7 +82,6 @@ jobs:
             echo "SOURCE_REPO=$(yq -r '.component.source_repo' "$config_file")"
             echo "COMPONENT_DIR=$(yq -r '.component.source_directory' "$config_file")"
             echo "GITHUB_IMAGE_ASSET_NAME=$(yq -r '.component.image_asset_name' "$config_file")"
-            echo "GITHUB_IMAGE_ARTIFACT_NAME=$(yq -r '.component.image_artifact_name' "$config_file")"
             echo "PLUGIN_CALLSIGN=$(yq -r '.component.plugin_callsign' "$config_file")"
             echo "BUILD_DEPENDENCY_SCRIPT=$(yq -r '.execution.dependency_script' "$config_file")"
             echo "BUILD_SCRIPT=$(yq -r '.execution.build_script' "$config_file")"
@@ -233,7 +232,7 @@ jobs:
             jq \
             ca-certificates \
             netcat-openbsd \
-            unzip
+            git-lfs
 
           command -v qemu-system-x86_64 >/dev/null
 
@@ -245,7 +244,7 @@ jobs:
             lcov \
             gcovr
 
-      - name: Download and prepare QEMU image from GitHub Actions artifacts
+      - name: Download and prepare default QEMU image
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -253,46 +252,64 @@ jobs:
           mkdir -p "$QEMU_WORKDIR"
           image_tar="$QEMU_WORKDIR/$GITHUB_IMAGE_ASSET_NAME"
           extract_dir="$QEMU_WORKDIR/image"
-          artifact_zip="$QEMU_WORKDIR/qemu-image-artifact.zip"
-          artifact_dir="$QEMU_WORKDIR/artifact"
+          image_repo="$SOURCE_REPO"
+          repo_image_tar="$GITHUB_WORKSPACE/$COMPONENT_DIR/$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME"
+          copied_image=false
 
-          # The image is manually uploaded (outside this workflow) as a
-          # GitHub Actions artifact; fetch the most recent non-expired copy.
-          artifacts_json="$(curl -sS -fL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${SOURCE_REPO}/actions/artifacts?name=${GITHUB_IMAGE_ARTIFACT_NAME}&per_page=100")"
+          if [[ -f "$repo_image_tar" ]]; then
+            cp -f "$repo_image_tar" "$image_tar"
+            copied_image=true
+          fi
 
-          download_url="$(echo "$artifacts_json" | jq -r \
-            '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].archive_download_url // empty')"
+          # Fallback 1: clone qemu branch and pull LFS image path.
+          if [[ "$copied_image" != "true" ]]; then
+            fallback_repo_dir="$QEMU_WORKDIR/fallback-repo"
+            rm -rf "$fallback_repo_dir"
 
-          [[ -n "$download_url" ]] || {
-            echo "ERROR: no non-expired artifact named '$GITHUB_IMAGE_ARTIFACT_NAME' found in ${SOURCE_REPO}" >&2
-            exit 1
-          }
+            if git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" "https://github.com/${image_repo}.git" "$fallback_repo_dir";
+              if command -v git-lfs >/dev/null 2>&1; then
+                (
+                  cd "$fallback_repo_dir"
+                  git lfs install --local
+                  git lfs pull --include "$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME" || true
+                )
+              fi
 
-          curl -sS -fL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "$download_url" -o "$artifact_zip"
+              fallback_image_tar="$fallback_repo_dir/$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME"
+              if [[ -f "$fallback_image_tar" ]]; then
+                cp -f "$fallback_image_tar" "$image_tar"
+                copied_image=true
+              fi
+            fi
+          fi
 
-          rm -rf "$artifact_dir"
-          mkdir -p "$artifact_dir"
-          unzip -q "$artifact_zip" -d "$artifact_dir"
+          # Fallback 2: latest release asset.
+          if [[ "$copied_image" != "true" ]]; then
+            releases_api="https://api.github.com/repos/${image_repo}/releases/latest"
+            release_json="$(curl -sS -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$releases_api")"
+            asset_id="$(echo "$release_json" | jq -r --arg name "$GITHUB_IMAGE_ASSET_NAME" '.assets[] | select(.name == $name) | .id' | head -n 1)"
 
-          found_image="$(find "$artifact_dir" -type f -name "$GITHUB_IMAGE_ASSET_NAME" | head -n 1 || true)"
-          [[ -n "$found_image" && -f "$found_image" ]] || {
-            echo "ERROR: $GITHUB_IMAGE_ASSET_NAME not found inside artifact '$GITHUB_IMAGE_ARTIFACT_NAME'" >&2
-            echo "Artifact contents:" >&2
-            find "$artifact_dir" -type f >&2
-            exit 1
-          }
-          cp -f "$found_image" "$image_tar"
+            [[ -n "$asset_id" && "$asset_id" != "null" ]] || {
+              echo "ERROR: release asset $GITHUB_IMAGE_ASSET_NAME not found in ${image_repo}" >&2
+              echo "Available assets in latest release:" >&2
+              echo "$release_json" | jq -r '.assets[]?.name' | sed 's/^/  - /' >&2
+              exit 1
+            }
+
+            curl -sS -fL \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/${image_repo}/releases/assets/$asset_id" \
+              -o "$image_tar"
+            copied_image=true
+          else
+            echo "Using repository-local image tar from checkout"
+          fi
 
           # Detect Git LFS pointer files before extraction.
           if head -n 1 "$image_tar" | grep -q 'version https://git-lfs.github.com/spec/v1'; then
             echo "ERROR: $image_tar is a Git LFS pointer, not the real artifact." >&2
-            echo "Ensure the uploaded artifact contains the real image file." >&2
+            echo "Ensure LFS objects are available for qemu image path." >&2
             exit 1
           fi
 
