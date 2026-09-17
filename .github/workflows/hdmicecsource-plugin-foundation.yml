@@ -264,7 +264,7 @@ jobs:
             "https://api.github.com/repos/${SOURCE_REPO}/actions/artifacts?name=${GITHUB_IMAGE_ARTIFACT_NAME}&per_page=100")"
 
           download_url="$(echo "$artifacts_json" | jq -r \
-            '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].archive_download_url // empty')
+            '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].archive_download_url // empty')"
 
           [[ -n "$download_url" ]] || {
             echo "ERROR: no non-expired artifact named '$GITHUB_IMAGE_ARTIFACT_NAME' found in ${SOURCE_REPO}" >&2
