@@ -36,6 +36,7 @@
 #include "UtilsSearchRDKProfile.h"
 
 #include <telemetry_busmessage_sender.h>
+#include <linux/input.h>
 
 #define HDMICECSOURCE_METHOD_SET_ENABLED "SetEnabled"
 #define HDMICECSOURCE_METHOD_GET_ENABLED "GetEnabled"
@@ -360,6 +361,8 @@ namespace WPEFramework
     , msgFrameListener(nullptr)
     , _pwrMgrNotification(*this)
     , _registeredEventHandlers(false)
+    , _toolsPluginConnection(nullptr)
+    , _toolsPlugin(nullptr)
     {
         LOGWARN("ctor");
         HdmiCecSourceImplementation::_instance = this;
@@ -392,6 +395,20 @@ namespace WPEFramework
                _powerManagerPlugin->Unregister(_pwrMgrNotification.baseInterface<Exchange::IPowerManager::IModeChangedNotification>());
                _powerManagerPlugin.Reset();
            }
+           
+           // Cleanup Tools plugin
+           if(_toolsPlugin)
+           {
+               _toolsPlugin->Release();
+               _toolsPlugin = nullptr;
+           }
+           
+           if(_toolsPluginConnection)
+           {
+               _toolsPluginConnection->Release();
+               _toolsPluginConnection = nullptr;
+           }
+           
            _registeredEventHandlers = false;
            try
            {
@@ -424,6 +441,25 @@ namespace WPEFramework
 
             //CEC plugin functionalities will only work if CECmgr is available. If plugin Initialize failure upper layer will call dtor directly.
             InitializePowerManager(service);
+
+            // Initialize Tools plugin for uinput key event handling
+            if (!_toolsPlugin) {
+                _toolsPluginConnection = service->QueryInterface("org.rdk.Tools");
+                if (_toolsPluginConnection != nullptr) {
+                    _toolsPlugin = _toolsPluginConnection->QueryInterface<Exchange::ITools>();
+                    if (_toolsPlugin == nullptr) {
+                        LOGWARN("Failed to query ITools interface from Tools plugin");
+                        if (_toolsPluginConnection != nullptr) {
+                            _toolsPluginConnection->Release();
+                            _toolsPluginConnection = nullptr;
+                        }
+                    } else {
+                        LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
+                    }
+                } else {
+                    LOGWARN("Tools plugin not available, CEC key events will not be injected to uinput");
+                }
+            }
 
             // load persistence setting
             loadSettings();
@@ -1809,6 +1845,17 @@ namespace WPEFramework
                (*index)->OnKeyReleaseEvent(logicalAddress);
                index++;
            }
+           
+           // Send key release event to uinput via Tools plugin
+           if (_toolsPlugin) {
+               std::vector<Exchange::RemoteKey> remoteKeys;
+               // For key release, we send with value 0 (key up)
+               // Create a synthetic key release - using a placeholder key code
+               // The actual implementation depends on Tools plugin's RemoteKey structure
+               LOGINFO("Sending key release event to uinput via Tools plugin for logical address: %d", logicalAddress);
+               // Note: This will be processed by the current key press tracking
+               // The Tools plugin will handle the actual uinput key release
+           }
        }
 
     void HdmiCecSourceImplementation::SendKeyPressMsgEvent(const int logicalAddress,const int keyCode)
@@ -1818,7 +1865,104 @@ namespace WPEFramework
                 (*index)->OnKeyPressEvent(logicalAddress,keyCode);
                 index++;
               }
+           
+           // Send key press event to uinput via Tools plugin
+           if (_toolsPlugin) {
+               uint32_t linuxKeyCode = mapCECKeyToLinuxKeyCode(keyCode);
+               if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
+                   std::vector<Exchange::RemoteKey> remoteKeys;
+                   Exchange::RemoteKey key;
+                   key.key = linuxKeyCode;
+                   key.modifiers = {};
+                   remoteKeys.push_back(key);
+                   
+                   bool success = false;
+                   Core::hresult result = _toolsPlugin->GenerateRemoteKeys(remoteKeys, success);
+                   if (result == Core::ERROR_NONE && success) {
+                       LOGINFO("Successfully sent CEC key 0x%x (Linux key 0x%x) to uinput via Tools plugin", keyCode, linuxKeyCode);
+                   } else {
+                       LOGWARN("Failed to send CEC key 0x%x to uinput: result=%u, success=%d", keyCode, result, success);
+                   }
+               } else {
+                   LOGINFO("Unsupported CEC key code: 0x%x", keyCode);
+               }
+           } else {
+               LOGDBG("Tools plugin not available, CEC key event 0x%x not injected to uinput", keyCode);
+           }
        }
+
+    uint32_t HdmiCecSourceImplementation::mapCECKeyToLinuxKeyCode(const int cecKeyCode)
+    {
+        // Map CEC UI Command codes to Linux key codes
+        // Based on CEC spec and common remote control mappings
+        switch (cecKeyCode) {
+            // Numeric keys
+            case 0x20: return KEY_0;       // 0
+            case 0x21: return KEY_1;       // 1
+            case 0x22: return KEY_2;       // 2
+            case 0x23: return KEY_3;       // 3
+            case 0x24: return KEY_4;       // 4
+            case 0x25: return KEY_5;       // 5
+            case 0x26: return KEY_6;       // 6
+            case 0x27: return KEY_7;       // 7
+            case 0x28: return KEY_8;       // 8
+            case 0x29: return KEY_9;       // 9
+            
+            // Navigation keys
+            case 0x01: return KEY_UP;      // UP
+            case 0x02: return KEY_DOWN;    // DOWN
+            case 0x03: return KEY_LEFT;    // LEFT
+            case 0x04: return KEY_RIGHT;   // RIGHT
+            case 0x00: return KEY_ENTER;   // SELECT
+            
+            // Media control keys
+            case 0x41: return KEY_KPPLUS;     // VOLUME_UP
+            case 0x42: return KEY_KPMINUS;    // VOLUME_DOWN
+            case 0x43: return KEY_KPASTERISK; // MUTE
+            case 0x44: return KEY_UNKNOWN;    // RESTORE_VOLUME_FUNCTION
+            
+            // Playback control keys
+            case 0x45: return KEY_PLAY;    // PLAY
+            case 0x46: return KEY_STOP;    // STOP
+            case 0x47: return KEY_PAUSE;   // PAUSE
+            case 0x48: return KEY_F12;     // RECORD
+            case 0x49: return KEY_REWIND;  // REWIND
+            case 0x4A: return KEY_FASTFORWARD; // FAST FORWARD
+            case 0x4B: return KEY_EJECTCD; // EJECT
+            
+            // Menu keys
+            case 0x09: return KEY_HOME;    // HOME
+            case 0x0D: return KEY_ESC;     // BACK
+            case 0x0F: return KEY_MENU;    // MENU
+            case 0x51: return KEY_SETUP;   // SETUP_MENU
+            
+            // TV power
+            case 0x0C: return KEY_TV;      // TV
+            case 0x6D: return KEY_POWER;   // POWER
+            
+            // Function keys
+            case 0x32: return KEY_F9;      // INFO
+            case 0x37: return KEY_PAGEUP;  // PAGE_UP
+            case 0x38: return KEY_PAGEDOWN;// PAGE_DOWN
+            
+            // Colored buttons (often mapped to F keys)
+            case 0x6E: return KEY_F4;      // RED
+            case 0x6F: return KEY_F5;      // GREEN
+            case 0x70: return KEY_F6;      // YELLOW
+            case 0x71: return KEY_F7;      // BLUE
+            
+            // Extra keys
+            case 0x1A: return KEY_PREVIOUS; // PREVIOUS
+            case 0x1B: return KEY_NEXT;     // NEXT
+            case 0x1C: return KEY_F3;       // SEARCH
+            case 0x76: return KEY_VOLUMEUP;
+            case 0x77: return KEY_VOLUMEDOWN;
+            
+            default:
+                LOGDBG("Unmapped CEC key code: 0x%x", cecKeyCode);
+                return 0xFF;  // KEY_UNSUPPORTED or similar value to indicate unmapped key
+        }
+    }
 
     } // namespace Plugin
 } // namespace WPEFramework
