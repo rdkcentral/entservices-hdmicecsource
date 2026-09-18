@@ -1857,7 +1857,7 @@ namespace WPEFramework
                if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
                    std::vector<Exchange::RemoteKey> remoteKeys;
                    Exchange::RemoteKey key;
-                   key.code = linuxKeyCode;
+                   key.code = static_cast<Exchange::RemoteKeyCode>(linuxKeyCode);
                    remoteKeys.push_back(key);
                    
                    bool success = false;
