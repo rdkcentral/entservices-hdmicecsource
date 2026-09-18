@@ -361,7 +361,6 @@ namespace WPEFramework
     , msgFrameListener(nullptr)
     , _pwrMgrNotification(*this)
     , _registeredEventHandlers(false)
-    , _toolsPluginConnection(nullptr)
     , _toolsPlugin(nullptr)
     {
         LOGWARN("ctor");
@@ -403,12 +402,6 @@ namespace WPEFramework
                _toolsPlugin = nullptr;
            }
            
-           if(_toolsPluginConnection)
-           {
-               _toolsPluginConnection->Release();
-               _toolsPluginConnection = nullptr;
-           }
-           
            _registeredEventHandlers = false;
            try
            {
@@ -444,20 +437,12 @@ namespace WPEFramework
 
             // Initialize Tools plugin for uinput key event handling
             if (!_toolsPlugin) {
-                _toolsPluginConnection = service->QueryInterface("org.rdk.Tools");
-                if (_toolsPluginConnection != nullptr) {
-                    _toolsPlugin = _toolsPluginConnection->QueryInterface<Exchange::ITools>();
-                    if (_toolsPlugin == nullptr) {
-                        LOGWARN("Failed to query ITools interface from Tools plugin");
-                        if (_toolsPluginConnection != nullptr) {
-                            _toolsPluginConnection->Release();
-                            _toolsPluginConnection = nullptr;
-                        }
-                    } else {
-                        LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
-                    }
-                } else {
+                _toolsPlugin = service->QueryInterface<Exchange::ITools>();
+                if (_toolsPlugin == nullptr) {
                     LOGWARN("Tools plugin not available, CEC key events will not be injected to uinput");
+                } else {
+                    LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
+                    _toolsPlugin->AddRef();
                 }
             }
 
@@ -1872,8 +1857,7 @@ namespace WPEFramework
                if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
                    std::vector<Exchange::RemoteKey> remoteKeys;
                    Exchange::RemoteKey key;
-                   key.key = linuxKeyCode;
-                   key.modifiers = {};
+                   key.code = linuxKeyCode;
                    remoteKeys.push_back(key);
                    
                    bool success = false;

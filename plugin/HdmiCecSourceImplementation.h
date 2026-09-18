@@ -318,7 +318,6 @@ namespace WPEFramework {
             PowerManagerInterfaceRef _powerManagerPlugin;
             Core::Sink<PowerManagerNotification> _pwrMgrNotification;
             bool _registeredEventHandlers;
-            WPEFramework::RPC::IRemoteConnection* _toolsPluginConnection;
             Exchange::ITools* _toolsPlugin;
             private:
                 mutable Core::CriticalSection _adminLock;
