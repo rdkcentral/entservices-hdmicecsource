@@ -171,7 +171,7 @@ namespace WPEFramework
                 return Core::ERROR_INVALID_PARAMETER;
             }
 
-            Exchange::HdmiCecSourceSuccess success;
+            Exchange::IHdmiCecSource::HdmiCecSourceSuccess success;
             const uint32_t result = _hdmiCecSource->SetOSDName(name->String(), success);
             if (result == Core::ERROR_NONE) {
                 response[_T("success")] = success.success;
