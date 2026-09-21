@@ -396,10 +396,13 @@ namespace WPEFramework
            }
            
            // Cleanup Tools plugin
-           if(_toolsPlugin)
            {
-               _toolsPlugin->Release();
-               _toolsPlugin = nullptr;
+               std::lock_guard<std::mutex> lock(_toolsPluginLock);
+               if(_toolsPlugin)
+               {
+                   _toolsPlugin->Release();
+                   _toolsPlugin = nullptr;
+               }
            }
            
            _registeredEventHandlers = false;
@@ -415,6 +418,33 @@ namespace WPEFramework
            {
                LOGERR("Unknown exception in UnRegister");
            }
+    }
+
+    void HdmiCecSourceImplementation::initializeToolsPlugin()
+    {
+        std::lock_guard<std::mutex> lock(_toolsPluginLock);
+        
+        if (_toolsPlugin != nullptr) {
+            return;  // Already initialized
+        }
+
+        // Try to get Tools plugin through WPEFramework RPC
+        // The callsign should match the Tools plugin configuration
+        RPC::IRemoteConnection* connection = Core::System::ModuleName().Instance(
+            "org.rdk.Tools");
+        
+        if (connection != nullptr) {
+            _toolsPlugin = connection->QueryInterface<Exchange::ITools>();
+            if (_toolsPlugin != nullptr) {
+                LOGINFO("Successfully acquired ITools interface from Tools plugin");
+                _toolsPlugin->AddRef();
+            } else {
+                LOGWARN("Failed to query ITools interface from Tools plugin connection");
+            }
+            connection->Release();
+        } else {
+            LOGDBG("Tools plugin (org.rdk.Tools) not available yet");
+        }
     }
 
     Core::hresult HdmiCecSourceImplementation::Configure(PluginHost::IShell* service)
@@ -436,14 +466,12 @@ namespace WPEFramework
             InitializePowerManager(service);
 
             // Initialize Tools plugin for uinput key event handling
-            if (!_toolsPlugin) {
-                _toolsPlugin = service->QueryInterface<Exchange::ITools>();
-                if (_toolsPlugin == nullptr) {
-                    LOGWARN("Tools plugin not available, CEC key events will not be injected to uinput");
-                } else {
-                    LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
-                    _toolsPlugin->AddRef();
-                }
+            // Note: Tools plugin may not be loaded yet, will try again on first key press
+            initializeToolsPlugin();
+            if (_toolsPlugin == nullptr) {
+                LOGWARN("Tools plugin not available at startup, will retry on first key press");
+            } else {
+                LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
             }
 
             // load persistence setting
@@ -1852,6 +1880,11 @@ namespace WPEFramework
               }
            
            // Send key press event to uinput via Tools plugin
+           if (_toolsPlugin == nullptr) {
+               // Lazy initialization - try to connect if not already connected
+               initializeToolsPlugin();
+           }
+           
            if (_toolsPlugin) {
                uint32_t linuxKeyCode = mapCECKeyToLinuxKeyCode(keyCode);
                if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
