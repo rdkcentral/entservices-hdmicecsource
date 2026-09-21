@@ -316,12 +316,13 @@ namespace WPEFramework {
             uint32_t sendKeyPressEvent(const int logicalAddress, int keyCode);
             int getUIKeyCode(int keyCode);
             uint32_t mapCECKeyToLinuxKeyCode(const int cecKeyCode);
-            void initializeToolsPlugin();
+            void initializeToolsPlugin(PluginHost::IShell* service);
             PowerManagerInterfaceRef _powerManagerPlugin;
             Core::Sink<PowerManagerNotification> _pwrMgrNotification;
             bool _registeredEventHandlers;
             Exchange::ITools* _toolsPlugin;
             mutable std::mutex _toolsPluginLock;
+            PluginHost::IShell* _service;
             private:
                 mutable Core::CriticalSection _adminLock;
                 std::list<Exchange::IHdmiCecSource::INotification*> _hdmiCecSourceNotifications;

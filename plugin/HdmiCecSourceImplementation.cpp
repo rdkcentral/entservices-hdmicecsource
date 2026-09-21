@@ -362,6 +362,7 @@ namespace WPEFramework
     , _pwrMgrNotification(*this)
     , _registeredEventHandlers(false)
     , _toolsPlugin(nullptr)
+    , _service(nullptr)
     {
         LOGWARN("ctor");
         HdmiCecSourceImplementation::_instance = this;
@@ -420,7 +421,7 @@ namespace WPEFramework
            }
     }
 
-    void HdmiCecSourceImplementation::initializeToolsPlugin()
+    void HdmiCecSourceImplementation::initializeToolsPlugin(PluginHost::IShell* service)
     {
         std::lock_guard<std::mutex> lock(_toolsPluginLock);
         
@@ -428,10 +429,14 @@ namespace WPEFramework
             return;  // Already initialized
         }
 
-        // Try to get Tools plugin through WPEFramework RPC
+        if (service == nullptr) {
+            LOGWARN("Service is null, cannot initialize Tools plugin");
+            return;
+        }
+
+        // Try to get Tools plugin through WPEFramework RPC using the service interface
         // The callsign should match the Tools plugin configuration
-        RPC::IRemoteConnection* connection = Core::System::ModuleName().Instance(
-            "org.rdk.Tools");
+        RPC::IRemoteConnection* connection = service->RemoteConnection("org.rdk.Tools");
         
         if (connection != nullptr) {
             _toolsPlugin = connection->QueryInterface<Exchange::ITools>();
@@ -455,6 +460,10 @@ namespace WPEFramework
         PowerState pwrStatePrev = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         Core::hresult res = Core::ERROR_GENERAL;
         string msg;
+        
+        // Store the service for later use
+        _service = service;
+        
         if (Utils::IARM::init()) {
             //Initialize cecEnableStatus to false in ctor
             cecEnableStatus = false;
@@ -467,7 +476,7 @@ namespace WPEFramework
 
             // Initialize Tools plugin for uinput key event handling
             // Note: Tools plugin may not be loaded yet, will try again on first key press
-            initializeToolsPlugin();
+            initializeToolsPlugin(service);
             if (_toolsPlugin == nullptr) {
                 LOGWARN("Tools plugin not available at startup, will retry on first key press");
             } else {
@@ -1882,7 +1891,9 @@ namespace WPEFramework
            // Send key press event to uinput via Tools plugin
            if (_toolsPlugin == nullptr) {
                // Lazy initialization - try to connect if not already connected
-               initializeToolsPlugin();
+               if (_service != nullptr) {
+                   initializeToolsPlugin(_service);
+               }
            }
            
            if (_toolsPlugin) {
