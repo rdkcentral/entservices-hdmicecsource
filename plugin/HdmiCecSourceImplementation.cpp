@@ -436,7 +436,7 @@ namespace WPEFramework
 
         // Try to get Tools plugin through WPEFramework RPC using the service interface
         // The callsign should match the Tools plugin configuration
-        RPC::IRemoteConnection* connection = service->RemoteConnection("org.rdk.Tools");
+        RPC::IRemoteConnection* connection = service->QueryInterface("org.rdk.Tools");
         
         if (connection != nullptr) {
             _toolsPlugin = connection->QueryInterface<Exchange::ITools>();
