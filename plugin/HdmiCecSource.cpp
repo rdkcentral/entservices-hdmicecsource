@@ -52,7 +52,7 @@ namespace WPEFramework
 
         const string HdmiCecSource::Initialize(PluginHost::IShell *service)
         {
-           LOGWARN("Initlaizing HdmiCecSource plugin \n");
+           LOGWARN("Test: Initlaizing HdmiCecSource plugin \n");
 
            profileType = searchRdkProfile();
 
@@ -80,12 +80,12 @@ namespace WPEFramework
                 _hdmiCecSource->Configure(service);
                 _hdmiCecSource->Register(&_notification);
                 Exchange::JHdmiCecSource::Register(*this, _hdmiCecSource);
-                LOGINFO("HdmiCecSource plugin is available. Successfully activated HdmiCecSource Plugin");
+                LOGINFO("Test1: HdmiCecSource plugin is available. Successfully activated HdmiCecSource Plugin");
             }
             else
             {
                 msg = "HdmiCecSource plugin is not available";
-                LOGINFO("HdmiCecSource plugin is not available. Failed to activate HdmiCecSource Plugin");
+                LOGINFO("Test2: HdmiCecSource plugin is not available. Failed to activate HdmiCecSource Plugin");
             }
 
             if (0 != msg.length())
