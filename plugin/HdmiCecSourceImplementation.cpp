@@ -434,19 +434,13 @@ namespace WPEFramework
             return;
         }
 
-        // Try to get Tools plugin through WPEFramework RPC using the service interface
-        // The callsign should match the Tools plugin configuration
-        RPC::IRemoteConnection* connection = service->QueryInterface("org.rdk.Tools");
+        // Try to get Tools plugin using the correct WPEFramework API
+        // Use QueryInterfaceByCallsign to get the interface from the callsign
+        _toolsPlugin = service->QueryInterfaceByCallsign<Exchange::ITools>("org.rdk.Tools");
         
-        if (connection != nullptr) {
-            _toolsPlugin = connection->QueryInterface<Exchange::ITools>();
-            if (_toolsPlugin != nullptr) {
-                LOGINFO("Successfully acquired ITools interface from Tools plugin");
-                _toolsPlugin->AddRef();
-            } else {
-                LOGWARN("Failed to query ITools interface from Tools plugin connection");
-            }
-            connection->Release();
+        if (_toolsPlugin != nullptr) {
+            LOGINFO("Successfully acquired ITools interface from Tools plugin");
+            _toolsPlugin->AddRef();
         } else {
             LOGDBG("Tools plugin (org.rdk.Tools) not available yet");
         }
