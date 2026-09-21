@@ -36,6 +36,8 @@
 #include "UtilsSearchRDKProfile.h"
 
 #include <telemetry_busmessage_sender.h>
+#include <atomic>
+#include <chrono>
 
 #define HDMICECSOURCE_METHOD_SET_ENABLED "SetEnabled"
 #define HDMICECSOURCE_METHOD_GET_ENABLED "GetEnabled"
@@ -67,6 +69,7 @@
 #define CEC_SETTING_OTP_ENABLED "cecOTPEnabled"
 #define CEC_SETTING_OSD_NAME "cecOSDName"
 #define CEC_SETTING_VENDOR_ID "cecVendorId"
+#define FUNCTION_PROFILING_MARKER_FILE "/opt/hdmicecprof"
 
 static std::vector<uint8_t> defaultVendorId = {0x00,0x19,0xFB};
 static VendorID appVendorId = {defaultVendorId.at(0),defaultVendorId.at(1),defaultVendorId.at(2)};
@@ -88,6 +91,51 @@ namespace WPEFramework
 {
     namespace Plugin
     {
+        namespace {
+            std::atomic_bool functionProfilingEnabled { false };
+        }
+
+        class ScopedFunctionProfiler {
+        public:
+            explicit ScopedFunctionProfiler(const char* functionName)
+                : _functionName(functionName)
+                , _enabled(functionProfilingEnabled.load(std::memory_order_relaxed))
+            {
+                if (!_enabled) {
+                    return;
+                }
+
+                _entrySteady = std::chrono::steady_clock::now();
+                const auto entryNow = std::chrono::system_clock::now();
+                const auto entryMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    entryNow.time_since_epoch()).count();
+                LOGINFO("[PROFILE][ENTRY] %s entry_time_ms=%lld", _functionName, static_cast<long long>(entryMs));
+            }
+
+            ~ScopedFunctionProfiler()
+            {
+                if (!_enabled) {
+                    return;
+                }
+
+                const auto exitNow = std::chrono::system_clock::now();
+                const auto exitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    exitNow.time_since_epoch()).count();
+                const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - _entrySteady).count();
+
+                LOGINFO("[PROFILE][EXIT] %s exit_time_ms=%lld time_taken_us=%lld",
+                        _functionName,
+                        static_cast<long long>(exitMs),
+                        static_cast<long long>(elapsedUs));
+            }
+
+        private:
+            const char* _functionName;
+            bool _enabled;
+            std::chrono::steady_clock::time_point _entrySteady;
+        };
+
         SERVICE_REGISTRATION(HdmiCecSourceImplementation, API_VERSION_NUMBER_MAJOR, API_VERSION_NUMBER_MINOR, API_VERSION_NUMBER_PATCH);
 
         HdmiCecSourceImplementation* HdmiCecSourceImplementation::_instance = nullptr;
@@ -369,6 +417,11 @@ namespace WPEFramework
     {
         LOGINFO("Configure");
         ASSERT(service != nullptr);
+        Core::File profilingMarker(FUNCTION_PROFILING_MARKER_FILE);
+        const bool profilingEnabled = profilingMarker.Exists();
+        functionProfilingEnabled.store(profilingEnabled, std::memory_order_relaxed);
+        LOGINFO("Function profiling is %s", profilingEnabled ? "enabled" : "disabled");
+
         PowerState pwrStateCur = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         PowerState pwrStatePrev = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         Core::hresult res = Core::ERROR_GENERAL;
@@ -548,6 +601,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetActiveSourceStatus(bool &isActiveSource, bool &success)
        {
+              ScopedFunctionProfiler profile(__FUNCTION__);
             isActiveSource = isDeviceActiveSource;
             success = true;
             return Core::ERROR_NONE;
@@ -555,6 +609,7 @@ namespace WPEFramework
 
 	    uint32_t HdmiCecSourceImplementation::sendKeyPressEvent(const int logicalAddress, int keyCode)
 		{
+            ScopedFunctionProfiler profile(__FUNCTION__);
 			if(!(_instance->smConnection))
             {
                  return Core::ERROR_GENERAL;
@@ -599,6 +654,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SendKeyPressEvent(const uint32_t &logicalAddress,const uint32_t &keyCode, HdmiCecSourceSuccess &success)
 		{
+            ScopedFunctionProfiler profile(__FUNCTION__);
             //Input params validation
             if(logicalAddress > LogicalAddress::UNREGISTERED)
             {
@@ -634,6 +690,7 @@ namespace WPEFramework
 
 		void HdmiCecSourceImplementation::sendKeyReleaseEvent(const int logicalAddress)
 		 {
+            ScopedFunctionProfiler profile(__FUNCTION__);
 	            LOGINFO(" sendKeyReleaseEvent logicalAddress 0x%x \n",logicalAddress);
                     if(!(_instance->smConnection))
                     {
@@ -645,6 +702,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SendStandbyMessage(HdmiCecSourceSuccess &success)
        {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             bool ret = false;
 
             if(true == cecEnableStatus)
@@ -892,6 +950,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SetEnabled(const bool &enabled, HdmiCecSourceSuccess &success)
         {
+              ScopedFunctionProfiler profile(__FUNCTION__);
            LOGINFO("Entered SetEnabled ");
 
            Core:: hresult ret = setEnabledInternal(enabled, true);
@@ -929,6 +988,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SetOTPEnabled(const bool &enabled, HdmiCecSourceSuccess &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
            if (cecOTPSettingEnabled != enabled)
            {
                LOGINFO("persist SetOTPEnabled ");
@@ -941,6 +1001,7 @@ namespace WPEFramework
 
         void HdmiCecSourceImplementation::CECEnable(void)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("Entered CECEnable");
 
             if (cecEnableStatus)
@@ -1085,6 +1146,7 @@ namespace WPEFramework
 
         void HdmiCecSourceImplementation::CECDisable(void)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("Entered CECDisable ");
 
             if(!cecEnableStatus)
@@ -1169,6 +1231,7 @@ namespace WPEFramework
 
         void HdmiCecSourceImplementation::getPhysicalAddress()
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("Entered getPhysicalAddress ");
 
             uint32_t physAddress = 0x0F0F0F0F;
@@ -1186,10 +1249,11 @@ namespace WPEFramework
 
         void HdmiCecSourceImplementation::getLogicalAddress()
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("Entered getLogicalAddress ");
 
             try{
-                LogicalAddress addr = LibCCEC::getInstance().getLogicalAddress(DEV_TYPE_TUNER);
+                LogicalAddress addr = LibCCEC::getInstance().getLogicalAddress(DeviceType::PLAYBACK_DEVICE);
 
                 std::string logicalAddrDeviceType = DeviceType(LogicalAddress(addr).getType()).toString();
 
@@ -1212,6 +1276,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetEnabled(bool &enabled, bool &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("GetEnabled :%d ",cecEnableStatus);
             enabled = cecEnableStatus;
             success = true;
@@ -1220,6 +1285,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetOTPEnabled(bool &enabled, bool &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             enabled = cecOTPSettingEnabled;
             LOGINFO("GetOTPEnabled :%d ",cecOTPSettingEnabled);
             success = true;
@@ -1228,6 +1294,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetOSDName(std::string &name, bool &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             name = osdName.toString();
             LOGINFO("GetOSDName :%s ",name.c_str());
             success = true;
@@ -1236,6 +1303,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SetOSDName(const std::string &name, HdmiCecSourceSuccess &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("SetOSDName :%s ",name.c_str());
             osdName = name.c_str();
             Utils::persistJsonSettings (CEC_SETTING_ENABLED_FILE, CEC_SETTING_OSD_NAME, JsonValue(name.c_str()));
@@ -1245,6 +1313,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetVendorId(std::string &vendorid, bool &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             vendorid = appVendorId.toString();
             LOGINFO("GetVendorId :%s ",vendorid.c_str());
             success = true;
@@ -1253,6 +1322,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::SetVendorId(const string &vendorid, HdmiCecSourceSuccess &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("SetVendorId :%s ",vendorid.c_str());
             if (vendorid.empty()) {
                 LOGERR("SetVendorId failed: vendorid is not given");
@@ -1288,6 +1358,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::PerformOTPAction(HdmiCecSourceSuccess &success)
         {
+            ScopedFunctionProfiler profile(__FUNCTION__);
             LOGINFO("PerformOTPAction ");
             bool ret = false; 
 
@@ -1330,6 +1401,7 @@ namespace WPEFramework
 
         Core::hresult HdmiCecSourceImplementation::GetDeviceList(uint32_t &numberofdevices, IHdmiCecSourceDeviceListIterator*& deviceList, bool &success)
         {   //sample servicemanager response:
+            ScopedFunctionProfiler profile(__FUNCTION__);
             std::vector<Exchange::IHdmiCecSource::HdmiCecSourceDevices> localDevices;
             Exchange::IHdmiCecSource::HdmiCecSourceDevices actual_hdmicecdevices = {0};
 	    if (!HdmiCecSourceImplementation::_instance)
@@ -1372,6 +1444,7 @@ namespace WPEFramework
 
 	bool HdmiCecSourceImplementation::pingDeviceUpdateList (int idev)
 	{
+        ScopedFunctionProfiler profile(__FUNCTION__);
 		bool isConnected = false;
 		//self ping is not required
 		if (idev == logicalAddress.toInt()){
