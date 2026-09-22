@@ -323,6 +323,11 @@ namespace WPEFramework {
             Exchange::ITools* _toolsPlugin;
             mutable std::mutex _toolsPluginLock;
             PluginHost::IShell* _service;
+            
+            // Track last pressed key to send release event
+            uint32_t m_lastPressedLinuxKeyCode;
+            std::mutex m_lastKeyCodeMutex;
+            
             private:
                 mutable Core::CriticalSection _adminLock;
                 std::list<Exchange::IHdmiCecSource::INotification*> _hdmiCecSourceNotifications;
