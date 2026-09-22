@@ -363,7 +363,6 @@ namespace WPEFramework
     , _registeredEventHandlers(false)
     , _toolsPlugin(nullptr)
     , _service(nullptr)
-    , m_lastPressedLinuxKeyCode(0)
     {
         LOGWARN("ctor");
         HdmiCecSourceImplementation::_instance = this;
@@ -1863,33 +1862,8 @@ namespace WPEFramework
                index++;
            }
            
-           // Send immediate key release to uinput via Tools plugin to interrupt the long key press
-           if (_toolsPlugin) {
-               uint32_t linuxKeyCode = 0;
-               // Get the last pressed key code
-               {
-                   std::lock_guard<std::mutex> lock(m_lastKeyCodeMutex);
-                   linuxKeyCode = m_lastPressedLinuxKeyCode;
-               }
-               
-               if (linuxKeyCode != 0) {
-                   // Send the same key with 0 duration to immediately release it
-                   std::vector<Exchange::RemoteKey> releaseKeys;
-                   Exchange::RemoteKey key;
-                   key.code = static_cast<Exchange::RemoteKeyCode>(linuxKeyCode);
-                   releaseKeys.push_back(key);
-                   
-                   bool success = false;
-                   Core::hresult result = _toolsPlugin->GenerateRemoteKeys(releaseKeys, success);
-                   if (result == Core::ERROR_NONE) {
-                       LOGINFO("Successfully sent immediate key release (0x%x) to uinput via Tools plugin for logical address: %d", linuxKeyCode, logicalAddress);
-                   } else {
-                       LOGWARN("Failed to send immediate key release (0x%x) to uinput: result=%u", linuxKeyCode, result);
-                   }
-               } else {
-                   LOGWARN("No previous key press tracked for release event");
-               }
-           }
+           // Key release is now handled by the short duration (200ms) set in SendKeyPressMsgEvent
+           LOGINFO("Received key release event from logical address: %d", logicalAddress);
        }
 
     void HdmiCecSourceImplementation::SendKeyPressMsgEvent(const int logicalAddress,const int keyCode)
@@ -1911,21 +1885,17 @@ namespace WPEFramework
            if (_toolsPlugin) {
                uint32_t linuxKeyCode = mapCECKeyToLinuxKeyCode(keyCode);
                if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
-                   // Track the Linux key code for use in key release
-                   {
-                       std::lock_guard<std::mutex> lock(m_lastKeyCodeMutex);
-                       m_lastPressedLinuxKeyCode = linuxKeyCode;
-                   }
-                   
                    std::vector<Exchange::RemoteKey> remoteKeys;
                    Exchange::RemoteKey key;
                    key.code = static_cast<Exchange::RemoteKeyCode>(linuxKeyCode);
+                   key.duration = 0.2;  // Set to 200ms instead of default 16s
+                   key.delay = 0;
                    remoteKeys.push_back(key);
                    
                    bool success = false;
                    Core::hresult result = _toolsPlugin->GenerateRemoteKeys(remoteKeys, success);
                    if (result == Core::ERROR_NONE && success) {
-                       LOGINFO("Successfully sent CEC key 0x%x (Linux key 0x%x) to uinput via Tools plugin", keyCode, linuxKeyCode);
+                       LOGINFO("Successfully sent CEC key 0x%x (Linux key 0x%x) with 200ms duration to uinput via Tools plugin", keyCode, linuxKeyCode);
                    } else {
                        LOGWARN("Failed to send CEC key 0x%x to uinput: result=%u, success=%d", keyCode, result, success);
                    }
