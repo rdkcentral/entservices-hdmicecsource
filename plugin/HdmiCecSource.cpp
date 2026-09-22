@@ -80,6 +80,8 @@ namespace WPEFramework
                 _hdmiCecSource->Configure(service);
                 _hdmiCecSource->Register(&_notification);
                 Exchange::JHdmiCecSource::Register(*this, _hdmiCecSource);
+                Unregister(_T("setOSDName"));
+                Register<Core::JSON::VariantContainer, Core::JSON::VariantContainer>(_T("setOSDName"), &HdmiCecSource::SetOSDNameJson, this);
                 LOGINFO("Test1: HdmiCecSource plugin is available. Successfully activated HdmiCecSource Plugin");
             }
             else
@@ -158,6 +160,22 @@ namespace WPEFramework
                 ASSERT(_service != nullptr);
                 Core::IWorkerPool::Instance().Submit(PluginHost::IShell::Job::Create(_service, PluginHost::IShell::DEACTIVATED, PluginHost::IShell::FAILURE));
             }
+        }
+
+        uint32_t HdmiCecSource::SetOSDNameJson(const Core::JSON::VariantContainer& parameters, Core::JSON::VariantContainer& response)
+        {
+            const Core::JSON::Variant& name = parameters[_T("name")];
+            if (name.Content() != Core::JSON::Variant::type::STRING) {
+                LOGERR("setOSDName rejected: name must be a JSON string");
+                return Core::ERROR_INVALID_PARAMETER;
+            }
+
+            Exchange::IHdmiCecSource::HdmiCecSourceSuccess success;
+            const uint32_t result = _hdmiCecSource->SetOSDName(name.String(), success);
+            if (result == Core::ERROR_NONE) {
+                response[_T("success")] = success.success;
+            }
+            return result;
         }
 
     } // namespace Plugin
