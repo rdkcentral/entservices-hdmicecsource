@@ -1862,15 +1862,18 @@ namespace WPEFramework
                index++;
            }
            
-           // Send key release event to uinput via Tools plugin
+           // Send key release event to uinput via Tools plugin to interrupt the long key press
            if (_toolsPlugin) {
-               std::vector<Exchange::RemoteKey> remoteKeys;
-               // For key release, we send with value 0 (key up)
-               // Create a synthetic key release - using a placeholder key code
-               // The actual implementation depends on Tools plugin's RemoteKey structure
-               LOGINFO("Sending key release event to uinput via Tools plugin for logical address: %d", logicalAddress);
-               // Note: This will be processed by the current key press tracking
-               // The Tools plugin will handle the actual uinput key release
+               // Send an empty key release event to immediately stop the pressed key
+               std::vector<Exchange::RemoteKey> releaseKeys;
+               // Send an empty vector to signal key release (duration: 0)
+               bool success = false;
+               Core::hresult result = _toolsPlugin->GenerateRemoteKeys(releaseKeys, success);
+               if (result == Core::ERROR_NONE) {
+                   LOGINFO("Successfully sent key release event to uinput via Tools plugin for logical address: %d", logicalAddress);
+               } else {
+                   LOGWARN("Failed to send key release event to uinput: result=%u", result);
+               }
            }
        }
 
