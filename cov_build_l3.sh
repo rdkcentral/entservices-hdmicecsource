@@ -65,11 +65,11 @@ cmake -G Ninja -S "${GITHUB_WORKSPACE}" -B build/entservices-hdmicecsource \
   -DCOMCAST_CONFIG=OFF \
   -DRDK_SERVICES_COVERITY=ON \
   -DPLUGIN_HDMICECSOURCE=ON \
-  -DDS_INCLUDE_DIRS:PATH="${INCPFX}/rdk/ds-stubs" \
-  -DDSHAL_INCLUDE_DIRS:PATH="${INCPFX}/rdk/ds-stubs" \
+  -DDS_INCLUDE_DIRS:PATH="${INCPFX}/rdk/ds" \
+  -DDSHAL_INCLUDE_DIRS:PATH="${INCPFX}/rdk/halif/ds-hal" \
   -DDSRPC_INCLUDE_DIRS:PATH="${INCPFX}" \
-  -DDS_LIBRARIES:STRING="${LIBPFX}/libds.a;${LIBPFX}/libdshalcli.a;${LIBPFX}/libdshal.a" \
-  -DDSHAL_LIBRARIES:FILEPATH="${LIBPFX}/libdshal.a" \
+  -DDS_LIBRARIES:STRING="${LIBPFX}/libds.so;${LIBPFX}/libdshalcli.so" \
+  -DDSHAL_LIBRARIES:FILEPATH="${LIBPFX}/libdshalcli.so" \
   -DIARMBUS_INCLUDE_DIRS:PATH="${INCPFX}/rdk/iarmbus" \
   -DIARMRECEIVER_INCLUDE_DIRS:PATH="${INCPFX}" \
   -DIARMBUS_LIBRARIES:FILEPATH="${LIBPFX}/libIARMBus.so" \
@@ -93,16 +93,10 @@ cmake --build build/entservices-hdmicecsource --target install
 
 implementation_so="${GITHUB_WORKSPACE}/install/usr/lib/wpeframework/plugins/libWPEFrameworkHdmiCecSourceImplementation.so"
 if [[ -f "$implementation_so" ]]; then
-  echo "--- Static DS linkage verification ---"
-  unresolved_ds=$(nm -D --undefined-only -C "$implementation_so" 2>/dev/null | grep -c 'device::' || true)
-  needed_ds=$(readelf -d "$implementation_so" 2>/dev/null | grep -cE 'NEEDED.*lib(ds|dshal|dshalcli)\.so' || true)
-  echo "  unresolved device:: symbols: $unresolved_ds"
-  echo "  DS shared-library dependencies: $needed_ds"
-
-  if [[ "$unresolved_ds" -ne 0 || "$needed_ds" -ne 0 ]]; then
-    echo "ERROR: DeviceSettings stubs were not statically linked into the implementation plugin" >&2
-    exit 1
-  fi
+  echo "--- Runtime DS linkage verification ---"
+  nm -D --undefined-only -C "$implementation_so" 2>/dev/null \
+    | grep -E 'device::|ds[A-Z]' | head -n 20 || true
+  echo "DeviceSettings symbols remain runtime-resolved."
 fi
 
 echo "--- build complete ---"
