@@ -52,6 +52,10 @@ git clone --branch support/AIDL --depth 1 https://github.com/rdkcentral/hdmicec.
 git clone --depth 1 https://github.com/rdkcentral/iarmbus.git
 git clone --branch 6.0.0 --depth 1 https://github.com/rdkcentral/rdk-halif-device_settings.git
 git clone --branch develop --depth 1 https://github.com/rdkcentral/devicesettings.git devicesettings-src
+# Reuse the maintained vDevice DeviceSettings stubs from the AIDL branch.
+git clone --branch topic/AIDL_dev --depth 1 --filter=blob:none --sparse \
+    https://github.com/rdkcentral/entservices-hdmicecsource.git hdmicecsource-aidl-stubs
+git -C hdmicecsource-aidl-stubs sparse-checkout set stubs
 
 ############################
 # Build Thunder-Tools
@@ -230,13 +234,41 @@ void t2_event_d(const char* marker, int value) { (void)marker; (void)value; }
 EOF
 gcc -shared -o "$STUB_LIB/libtelemetry_msgsender.so" /tmp/stub_telemetry.c -Wl,-soname,libtelemetry_msgsender.so.0
 
-# DeviceSettings linker shims — the guest's real DS libraries resolve the API
-# symbols when the plugin is loaded; these shims only provide their sonames at
-# link time and are never deployed.
-for lib in ds dshalcli; do
-    echo "void __${lib}_linker_shim(void){}" | gcc -shared -o "$STUB_LIB/lib${lib}.so" \
-        -x c - -Wl,-soname,"lib${lib}.so"
-done
+############################
+# Build maintained DeviceSettings compatibility stubs as STATIC archives.
+# The guest does not provide libds/libdshalcli/libdshal, so do not create a
+# DS shared object or copy a DS library into the guest.
+echo "======================================================================================"
+echo "Building static DeviceSettings stubs"
+UPSTREAM_STUB_DIR="$GITHUB_WORKSPACE/hdmicecsource-aidl-stubs/stubs"
+[[ -f "$UPSTREAM_STUB_DIR/devicesettings-stub.cpp" ]] || {
+    echo "ERROR: upstream devicesettings-stub.cpp is unavailable" >&2
+    exit 1
+}
+[[ -f "$UPSTREAM_STUB_DIR/dshal-stub.cpp" ]] || {
+    echo "ERROR: upstream dshal-stub.cpp is unavailable" >&2
+    exit 1
+}
+
+mkdir -p "$INSTALL_INC/rdk/ds-stubs"
+cp -f "$UPSTREAM_STUB_DIR"/*.h "$UPSTREAM_STUB_DIR"/*.hpp "$INSTALL_INC/rdk/ds-stubs/" 2>/dev/null || true
+
+g++ -c -fPIC -g -std=c++17 -I"$INSTALL_INC/rdk/ds-stubs" \
+    -o /tmp/devicesettings-stub.o "$UPSTREAM_STUB_DIR/devicesettings-stub.cpp"
+ar rcs "$STUB_LIB/libds.a" /tmp/devicesettings-stub.o
+ranlib "$STUB_LIB/libds.a"
+
+g++ -c -fPIC -g -std=c++17 -I"$INSTALL_INC/rdk/ds-stubs" \
+    -o /tmp/dshal-stub.o "$UPSTREAM_STUB_DIR/dshal-stub.cpp"
+ar rcs "$STUB_LIB/libdshal.a" /tmp/dshal-stub.o
+ranlib "$STUB_LIB/libdshal.a"
+
+echo "void __dshalcli_stub(void){}" | gcc -c -fPIC -g -x c - -o /tmp/dshalcli_stub.o
+ar rcs "$STUB_LIB/libdshalcli.a" /tmp/dshalcli_stub.o
+ranlib "$STUB_LIB/libdshalcli.a"
+
+echo "Created static DS archives:"
+ls -lh "$STUB_LIB/libds.a" "$STUB_LIB/libdshalcli.a" "$STUB_LIB/libdshal.a"
 
 # CEC/OSAL stubs — minimal symbols for link resolution only; the guest's real
 # libRCEC.so/libRCECOSHal.so provide the actual device:: symbols at runtime.
@@ -256,7 +288,7 @@ for lib in RCEC RCECOSHal; do
         -x c - -Wl,-soname,"$soname"
 done
 
-echo "Real headers and runtime-link compatibility libraries installed."
+echo "Real headers and stub libraries installed."
 echo "======================================================================================"
 
 # Verify critical headers landed correctly
@@ -265,8 +297,11 @@ for h in rdk/ds/manager.hpp rdk/halif/ds-hal/dsTypes.h rdk/iarmbus/libIARM.h \
          ccec/include/ccec/Connection.hpp osal/include/osal/Mutex.hpp; do
     [ -f "$INSTALL_INC/${h}" ] && echo "  OK   ${h}" || echo "  MISS ${h}" >&2
 done
-echo "--- Runtime-link library verification ---"
-ls -1 "$INSTALL_LIB/build-stubs"/lib{ds,dshalcli,RCEC,RCECOSHal,IARMBus,telemetry_msgsender}.so 2>&1
+echo "--- Stub library verification ---"
+ls -1 "$INSTALL_LIB/build-stubs"/lib{ds,dshalcli,dshal}.a \
+      "$INSTALL_LIB/build-stubs"/lib{RCEC,RCECOSHal,IARMBus,telemetry_msgsender}.so 2>&1
+echo "--- libds.a exported device:: symbols ---"
+nm -C "$INSTALL_LIB/build-stubs/libds.a" 2>/dev/null | grep -c 'device::' || true
 echo "---"
 
 ls -la ${GITHUB_WORKSPACE}
