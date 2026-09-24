@@ -426,7 +426,7 @@ namespace WPEFramework
         std::lock_guard<std::mutex> lock(_toolsPluginLock);
         
         if (_toolsPlugin != nullptr) {
-            return;  // Already initialized
+            return;
         }
 
         if (service == nullptr) {
@@ -434,8 +434,6 @@ namespace WPEFramework
             return;
         }
 
-        // Try to get Tools plugin using the correct WPEFramework API
-        // Use QueryInterfaceByCallsign to get the interface from the callsign
         _toolsPlugin = service->QueryInterfaceByCallsign<Exchange::ITools>("org.rdk.Tools");
         
         if (_toolsPlugin != nullptr) {
@@ -455,7 +453,6 @@ namespace WPEFramework
         Core::hresult res = Core::ERROR_GENERAL;
         string msg;
         
-        // Store the service for later use
         _service = service;
         
         if (Utils::IARM::init()) {
@@ -469,7 +466,6 @@ namespace WPEFramework
             InitializePowerManager(service);
 
             // Initialize Tools plugin for uinput key event handling
-            // Note: Tools plugin may not be loaded yet, will try again on first key press
             initializeToolsPlugin(service);
             if (_toolsPlugin == nullptr) {
                 LOGWARN("Tools plugin not available at startup, will retry on first key press");
@@ -1862,7 +1858,6 @@ namespace WPEFramework
                index++;
            }
            
-           // Key release is now handled by the short duration (200ms) set in SendKeyPressMsgEvent
            LOGINFO("Received key release event from logical address: %d", logicalAddress);
        }
 
@@ -1876,7 +1871,6 @@ namespace WPEFramework
            
            // Send key press event to uinput via Tools plugin
            if (_toolsPlugin == nullptr) {
-               // Lazy initialization - try to connect if not already connected
                if (_service != nullptr) {
                    initializeToolsPlugin(_service);
                }
