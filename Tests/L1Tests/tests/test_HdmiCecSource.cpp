@@ -50,7 +50,7 @@
 #define CEC_SETTING_OSD_NAME "cecOSDName"
 #define CEC_SETTING_VENDOR_ID "cecVendorId"
 
-using namespace WPEFramework;
+using namespace Thunder;
 using ::testing::NiceMock;
 
 namespace
@@ -1484,7 +1484,7 @@ TEST_F(HdmiCecSourceInitializedEventTest, powerModeChanged)
            return 0;
         }));
 
-    Plugin::HdmiCecSourceImplementation::_instance->onPowerModeChanged(WPEFramework::Exchange::IPowerManager::POWER_STATE_OFF, WPEFramework::Exchange::IPowerManager::POWER_STATE_ON);
+    Plugin::HdmiCecSourceImplementation::_instance->onPowerModeChanged(Thunder::Exchange::IPowerManager::POWER_STATE_OFF, Thunder::Exchange::IPowerManager::POWER_STATE_ON);
 }
 
 TEST_F(HdmiCecSourceInitializedTest, SendKeyPressEvent_Failure1)
@@ -1841,7 +1841,7 @@ TEST_F(HdmiCecSourceInitializedEventTest, powerModeChanged_ExceptionHandling)
     EXPECT_CALL(*p_libCCECImplMock, getLogicalAddress(::testing::_))
     .WillOnce(::testing::Throw(std::runtime_error("Invalid state")));
 
-    Plugin::HdmiCecSourceImplementation::_instance->onPowerModeChanged(WPEFramework::Exchange::IPowerManager::POWER_STATE_OFF, WPEFramework::Exchange::IPowerManager::POWER_STATE_ON);
+    Plugin::HdmiCecSourceImplementation::_instance->onPowerModeChanged(Thunder::Exchange::IPowerManager::POWER_STATE_OFF, Thunder::Exchange::IPowerManager::POWER_STATE_ON);
 }
 
 TEST_F(HdmiCecSourceInitializedEventTest, CECEnable_ExceptionHandling)

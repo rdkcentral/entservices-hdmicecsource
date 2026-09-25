@@ -35,12 +35,12 @@
     fflush(stderr);
 
 using ::testing::NiceMock;
-using namespace WPEFramework;
+using namespace Thunder;
 using testing::StrictMock;
-using HdmiCecSourceSuccess = WPEFramework::Exchange::IHdmiCecSource::HdmiCecSourceSuccess;
-using HdmiCecSourceDevice = WPEFramework::Exchange::IHdmiCecSource::HdmiCecSourceDevices;
-using IHdmiCecSourceDeviceListIterator = WPEFramework::Exchange::IHdmiCecSource::IHdmiCecSourceDeviceListIterator;
-using PowerState = WPEFramework::Exchange::IPowerManager::PowerState;
+using HdmiCecSourceSuccess = Thunder::Exchange::IHdmiCecSource::HdmiCecSourceSuccess;
+using HdmiCecSourceDevice = Thunder::Exchange::IHdmiCecSource::HdmiCecSourceDevices;
+using IHdmiCecSourceDeviceListIterator = Thunder::Exchange::IHdmiCecSource::IHdmiCecSourceDeviceListIterator;
+using PowerState = Thunder::Exchange::IPowerManager::PowerState;
 
 namespace {
     static void removeFile(const char* fileName)

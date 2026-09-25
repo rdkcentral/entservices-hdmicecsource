@@ -50,4 +50,4 @@ python3 suiteManager.py hdmicecsource
 
 
 Troubleshooting:
-- If you see connection errors, verify WPEFramework JSON-RPC and the vComponent API are reachable using the endpoint overrides above.
+- If you see connection errors, verify Thunder JSON-RPC and the vComponent API are reachable using the endpoint overrides above.

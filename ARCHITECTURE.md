@@ -2,7 +2,7 @@
 
 ## Overview
 
-The HdmiCecSource plugin is a WPEFramework (Thunder) plugin that provides HDMI-CEC (Consumer Electronics Control) functionality for source devices in RDK environments. It enables STB (Set-Top Box) devices to communicate with other HDMI-CEC enabled devices over the HDMI connection, allowing for device control, status monitoring, and inter-device communication.
+The HdmiCecSource plugin is a Thunder plugin that provides HDMI-CEC (Consumer Electronics Control) functionality for source devices in RDK environments. It enables STB (Set-Top Box) devices to communicate with other HDMI-CEC enabled devices over the HDMI connection, allowing for device control, status monitoring, and inter-device communication.
 
 ## System Architecture
 
@@ -10,8 +10,7 @@ The HdmiCecSource plugin is a WPEFramework (Thunder) plugin that provides HDMI-C
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    WPEFramework Core                         │
-│                  (Thunder Framework)                         │
+│                    Thunder Core                             │   
 └────────────────────┬────────────────────────────────────────┘
                      │
           ┌──────────┴──────────┐
@@ -135,7 +134,7 @@ The plugin exposes the `IHdmiCecSource` interface defined in Thunder interfaces:
 ## Dependencies and Interfaces
 
 ### External Dependencies
-- **WPEFramework**: Core plugin infrastructure (R4.4.1+)
+- **Thunder**: Core plugin infrastructure (R5.x)
 - **CEC Library**: HDMI-CEC protocol implementation
 - **IARMBus**: RDK Inter-Application Resource Management
 - **Device Settings**: Hardware abstraction layer

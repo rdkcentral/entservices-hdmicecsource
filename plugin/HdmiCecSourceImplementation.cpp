@@ -86,14 +86,14 @@ static std::atomic<int32_t> powerState{DEVICE_POWER_STATE_OFF};
 static PowerStatus tvPowerState(PowerStatus::POWER_STATUS_NOT_KNOWN);
 static bool isDeviceActiveSource = false;
 static bool isLGTvConnected = false;
-static std::atomic<PowerState> devicePowerState{WPEFramework::Exchange::IPowerManager::POWER_STATE_ON};
+static std::atomic<PowerState> devicePowerState{Thunder::Exchange::IPowerManager::POWER_STATE_ON};
 
 #define KEY_UNSUPPORTED 0xFF
 
-using namespace WPEFramework;
+using namespace Thunder;
 
 
-namespace WPEFramework
+namespace Thunder
 {
     namespace Plugin
     {
@@ -411,8 +411,8 @@ namespace WPEFramework
     {
         LOGINFO("Configure");
         ASSERT(service != nullptr);
-        PowerState pwrStateCur = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
-        PowerState pwrStatePrev = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
+        PowerState pwrStateCur = Thunder::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
+        PowerState pwrStatePrev = Thunder::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         Core::hresult res = Core::ERROR_GENERAL;
         string msg;
         if (Utils::IARM::init()) {
@@ -459,7 +459,7 @@ namespace WPEFramework
                  if (Core::ERROR_NONE == res)
                  {
                       devicePowerState.store(pwrStateCur);
-                      powerState.store((pwrStateCur == WPEFramework::Exchange::IPowerManager::POWER_STATE_ON)?DEVICE_POWER_STATE_ON:DEVICE_POWER_STATE_OFF);
+                      powerState.store((pwrStateCur == Thunder::Exchange::IPowerManager::POWER_STATE_ON)?DEVICE_POWER_STATE_ON:DEVICE_POWER_STATE_OFF);
                       LOGINFO("Current state is PowerManagerPlugin: (%d) powerState :%d \n",pwrStateCur,powerState.load());
                  }
              }
@@ -800,7 +800,7 @@ namespace WPEFramework
             LOGINFO("Event IARM_BUS_PWRMGR_EVENT_MODECHANGED: State Changed %d -- > %d\r",
                     currentState, newState);
             devicePowerState.store(newState);
-            if (WPEFramework::Exchange::IPowerManager::POWER_STATE_ON == newState)
+            if (Thunder::Exchange::IPowerManager::POWER_STATE_ON == newState)
             {
                 powerState.store(DEVICE_POWER_STATE_ON);
                 resumeCecStack();
@@ -1621,7 +1621,7 @@ namespace WPEFramework
 		int i = 0;
 		pthread_mutex_lock(&(_instance->m_lock));//pthread_cond_wait should be mutex protected. //pthread_cond_wait will unlock the mutex and perfoms wait for the condition.
 		while (!_instance->m_pollThreadExit) {
-            if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load())){
+            if(!(Thunder::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load())){
 			    bool isActivateUpdateThread = false;
 			    LOGINFO("Starting cec device polling");
 			    for(i=0; i< LogicalAddress::UNREGISTERED; i++ ) {
@@ -1629,7 +1629,7 @@ namespace WPEFramework
 			    	if (isConnected){
 			    		isActivateUpdateThread = isConnected;
 			    	}
-                    if(_instance->m_pollThreadExit || (WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
+                    if(_instance->m_pollThreadExit || (Thunder::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
                     {
                         break;
                     }
@@ -1661,7 +1661,7 @@ namespace WPEFramework
 
             while(!_instance->m_sendKeyEventThreadExit)
             {
-                if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
+                if(!(Thunder::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
                 {
                     keyInfo.logicalAddr = -1;
                     keyInfo.keyCode = -1;
@@ -1706,7 +1706,7 @@ namespace WPEFramework
 		int i = 0;
 		pthread_mutex_lock(&(_instance->m_lockUpdate));//pthread_cond_wait should be mutex protected. //pthread_cond_wait will unlock the mutex and perfoms wait for the condition.
 		while (!_instance->m_updateThreadExit) {
-            if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
+            if(!(Thunder::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
             {
 		    	//Wait for mutex signal here to continue the worker thread again.
 		    	pthread_cond_wait(&(_instance->m_condSigUpdate), &(_instance->m_lockUpdate));
@@ -1821,4 +1821,4 @@ namespace WPEFramework
        }
 
     } // namespace Plugin
-} // namespace WPEFramework
+} // namespace Thunder

@@ -108,7 +108,7 @@ The plugin exposes a comprehensive JSON-RPC interface for:
 - **Event Subscription**: Register for real-time notifications
 
 ### Integration Points
-- **WPEFramework Ecosystem**: Native Thunder plugin integration
+- **Thunder Ecosystem**: Native Thunder plugin integration
 - **IARM Bus**: System-wide event distribution in RDK
 - **Device Settings**: Hardware-level configuration access
 - **Power Manager**: Coordinated system power management
