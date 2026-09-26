@@ -455,10 +455,6 @@ namespace WPEFramework
         // Config is loaded lazily by DSHelper::_ensureConfigLoaded() on the first accessor call.
         // No explicit LoadVideoPortConfig call needed.
 
-        const std::string defaultVP = DSHelper::getDefaultVideoPortName();
-        VideoPortEntry defaultEntry{};
-        const bool entryResolved = DSHelper::resolveVideoPortByName(defaultVP, defaultEntry);
-
         // Register for resolution change notifications (fires on HDMI hotplug)
         {
             auto* vp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
@@ -470,52 +466,20 @@ namespace WPEFramework
             }
         }
 
-        // Acquire display handle for default port (not cached by DSHelper::LoadAllConfigs)
-        _displayHandle = INVALID_DS_HANDLE;
-        if (entryResolved && DSHelper::getCachedVideoPortHandle(defaultVP) != INVALID_DS_HANDLE) {
+        {
             auto* disp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
             if (disp != nullptr) {
-                Exchange::IDeviceSettingsDisplay::DisplayPortType dpType =
-                    static_cast<Exchange::IDeviceSettingsDisplay::DisplayPortType>(defaultEntry.type);
-                Core::hresult rc = disp->GetDisplay(dpType, defaultEntry.index, _displayHandle);
-                if (rc != Core::ERROR_NONE) {
-                    LOGERR("OnDeviceSettingsActivated: GetDisplay failed: %u", rc);
-                    _displayHandle = INVALID_DS_HANDLE;
-                } else {
-                    LOGINFO("OnDeviceSettingsActivated: cached _displayHandle=%d", _displayHandle);
-                }
                 // Register for HDMI hotplug (both connect and disconnect events)
                 disp->Register("HdmiCecSource", &_dsDisplayHotPlugNotification);
                 disp->Release();
             }
-        }
-
-        // Check display connected and detect LG TV via EDID manufacturer bytes
-        const int32_t vpHandle = DSHelper::getCachedVideoPortHandle(defaultVP);
-        if (vpHandle != INVALID_DS_HANDLE) {
-            auto* vp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
-            if (vp2 != nullptr) {
-                bool connected = false;
-                if (vp2->IsVideoPortDisplayConnected(vpHandle, connected) == Core::ERROR_NONE && connected) {
-                    if (_displayHandle != INVALID_DS_HANDLE) {
-                        auto* disp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
-                        if (disp2 != nullptr) {
-                            static const uint16_t kEdidBufLen = 256;
-                            std::vector<uint8_t> edidVec(kEdidBufLen, 0);
-                            if (disp2->GetDisplayEdidBytes(_displayHandle, edidVec.data(), kEdidBufLen) == Core::ERROR_NONE) {
-                                if (edidVec.size() > 9 && edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D) {
-                                    isLGTvConnected = true;
-                                }
-                                LOGINFO("OnDeviceSettingsActivated: manufacturer bytes %02x %02x isLGTvConnected=%d",
-                                        edidVec.at(8), edidVec.at(9), isLGTvConnected);
-                            }
-                            disp2->Release();
-                        }
-                    }
-                }
-                vp2->Release();
+            else {
+                LOGERR("Failed to get Display Interface");
             }
         }
+
+        // Dispatch initialization event
+        dispatchEvent(EV_DS_ACTIVATED_INIT, -1);
     }
 
     void HdmiCecSourceImplementation::OnDeviceSettingsDeactivated()
@@ -861,6 +825,68 @@ namespace WPEFramework
             if (event == EV_HOTPLUG) {
                 _instance->onHdmiHotPlug(connectStatus);
             }
+            else if (event == EV_DS_ACTIVATED_INIT) {
+                const std::string defaultVP = DSHelper::getDefaultVideoPortName();
+                VideoPortEntry defaultEntry{};
+                const bool entryResolved = DSHelper::resolveVideoPortByName(defaultVP, defaultEntry);
+
+                // Acquire display handle for default port (not cached by DSHelper::LoadAllConfigs)
+                _displayHandle = INVALID_DS_HANDLE;
+                if (entryResolved && DSHelper::getCachedVideoPortHandle(defaultVP) != INVALID_DS_HANDLE) {
+                    auto* disp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+                    if (disp != nullptr) {
+                        Exchange::IDeviceSettingsDisplay::DisplayPortType dpType =
+                            static_cast<Exchange::IDeviceSettingsDisplay::DisplayPortType>(defaultEntry.type);
+                        Core::hresult rc = disp->GetDisplay(dpType, defaultEntry.index, _displayHandle);
+                        if (rc != Core::ERROR_NONE) {
+                            LOGERR("OnDeviceSettingsActivated: GetDisplay failed: %u", rc);
+                            _displayHandle = INVALID_DS_HANDLE;
+                        } else {
+                            LOGINFO("OnDeviceSettingsActivated: cached _displayHandle=%d", _displayHandle);
+                        }
+                        disp->Release();
+                    }
+                    else {
+                        LOGERR("Failed to get Display Handle");
+                    }
+                }
+
+                // Check display connected and detect LG TV via EDID manufacturer bytes
+                const int32_t vpHandle = DSHelper::getCachedVideoPortHandle(defaultVP);
+                if (vpHandle != INVALID_DS_HANDLE) {
+                    auto* vp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
+                    if (vp2 != nullptr) {
+                        bool connected = false;
+                        if (vp2->IsVideoPortDisplayConnected(vpHandle, connected) == Core::ERROR_NONE && connected) {
+                            if (_displayHandle != INVALID_DS_HANDLE) {
+                                auto* disp2 = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+                                if (disp2 != nullptr) {
+                                    static const uint16_t kEdidBufLen = 256;
+                                    std::vector<uint8_t> edidVec(kEdidBufLen, 0);
+                                    if (disp2->GetDisplayEdidBytes(_displayHandle, edidVec.data(), kEdidBufLen) == Core::ERROR_NONE) {
+                                        if (edidVec.size() > 9 && edidVec.at(8) == 0x1E && edidVec.at(9) == 0x6D) {
+                                            isLGTvConnected = true;
+                                        }
+                                        LOGINFO("OnDeviceSettingsActivated: manufacturer bytes %02x %02x isLGTvConnected=%d",
+                                                edidVec.at(8), edidVec.at(9), isLGTvConnected);
+                                    }
+                                    disp2->Release();
+                                }
+                                else {
+                                    LOGERR("Failed to get Display interface");
+                                }
+                            }
+                            else {
+                                LOGERR("Failed to get Display handle");
+                            }
+                        }
+                        vp2->Release();
+                    }
+                }
+                else {
+                    LOGERR("Failed to get Video Port Handle for [%s]",defaultVP.c_str());
+                }
+            }
        }
 
        void HdmiCecSourceImplementation::onHdmiHotPlug(int connectStatus)
@@ -893,10 +919,22 @@ namespace WPEFramework
                                     }
                                     disp->Release();
                                 }
+                                else {
+                                    LOGERR("Failed to get Display interface");
+                                }
+                            }
+                            else {
+                                LOGERR("Failed to get Display handle");
                             }
                         }
                         vp->Release();
                     }
+                    else {
+                        LOGERR("Failed to get VideoPort interface");
+                    }
+                }
+                else {
+                    LOGERR("Failed to get Video Port Handle for [%s]", DSHelper::getDefaultVideoPortName().c_str());
                 }
 
                 if(smConnection)

@@ -230,7 +230,10 @@ namespace WPEFramework {
                 INTERFACE_ENTRY(Exchange::IConfiguration)
             END_INTERFACE_MAP
 
-            enum Event { EV_HOTPLUG };
+            enum Event { 
+                EV_HOTPLUG,
+                EV_DS_ACTIVATED_INIT
+            };
 
             // Job dispatched to the worker pool for every HDMI hot-plug event.
             // Calls Dispatch(Event, connectStatus) on the worker thread.
