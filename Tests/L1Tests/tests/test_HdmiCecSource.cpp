@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -30,12 +31,10 @@
 #include "FactoriesImplementation.h"
 #include "IarmBusMock.h"
 #include "ServiceMock.h"
-#include "devicesettings.h"
+#include "DeviceSettingsMock.h"
+#include "DeviceSettingsDisplayMock.h"
+#include "DeviceSettingsVideoPortMock.h"
 #include "HdmiCecMock.h"
-#include "DisplayMock.h"
-#include "VideoOutputPortMock.h"
-#include "HostMock.h"
-#include "ManagerMock.h"
 #include "ThunderPortability.h"
 #include "COMLinkMock.h"
 #include "HdmiCecSourceMock.h"
@@ -293,12 +292,7 @@ protected:
     string response;
     IarmBusImplMock   *p_iarmBusImplMock = nullptr ;
     IARM_EventHandler_t cecMgrEventHandler;
-    IARM_EventHandler_t dsHdmiEventHandler;
     IARM_EventHandler_t pwrMgrEventHandler;
-    ManagerImplMock   *p_managerImplMock = nullptr ;
-    HostImplMock      *p_hostImplMock = nullptr ;
-    VideoOutputPortMock      *p_videoOutputPortMock = nullptr ;
-    DisplayMock      *p_displayMock = nullptr ;
     LibCCECImplMock      *p_libCCECImplMock = nullptr ;
     ConnectionImplMock      *p_connectionImplMock = nullptr ;
     MessageEncoderMock      *p_messageEncoderMock = nullptr ;
@@ -311,6 +305,7 @@ protected:
     Core::ProxyType<WorkerPoolImplementation> workerPool;
     Core::ProxyType<Plugin::HdmiCecSourceImplementation> HdmiCecSourceImplementationImpl;
     Exchange::IHdmiCecSource::INotification *HdmiCecSourceNotification = nullptr;
+    Exchange::IDeviceSettingsDisplay::IDisplayHDMIHotPlugNotification *dsDisplayNotification = nullptr;
 
     HdmiCecSourceTest()
         : plugin(Core::ProxyType<Plugin::HdmiCecSource>::Create())
@@ -322,17 +317,50 @@ protected:
         p_iarmBusImplMock  = new testing::NiceMock <IarmBusImplMock>;
         IarmBus::setImpl(p_iarmBusImplMock);
 
-        p_managerImplMock  = new testing::NiceMock <ManagerImplMock>;
-        device::Manager::setImpl(p_managerImplMock);
+        ON_CALL(DeviceSettingsMock::Mock(), GetDeviceSettingConfigs(::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [](Exchange::IDeviceSettings::DeviceSettingConfigs& configs) {
+                    Exchange::IDeviceSettings::VideoPortTypeConfig typeConfig{};
+                    typeConfig.typeId = Exchange::IDeviceSettingsVideoPort::DS_VIDEO_PORT_TYPE_HDMI;
+                    typeConfig.name = "HDMI";
+                    configs.videoPortTypes.push_back(typeConfig);
 
-        p_hostImplMock  = new testing::NiceMock <HostImplMock>;
-        device::Host::setImpl(p_hostImplMock);
+                    Exchange::IDeviceSettings::VideoPortPortConfig portConfig{};
+                    portConfig.videoPortType = Exchange::IDeviceSettingsVideoPort::DS_VIDEO_PORT_TYPE_HDMI;
+                    portConfig.videoPortIndex = 0;
+                    configs.videoPorts.push_back(portConfig);
+                    return Core::ERROR_NONE;
+                }));
 
-        p_videoOutputPortMock  = new testing::NiceMock <VideoOutputPortMock>;
-        device::VideoOutputPort::setImpl(p_videoOutputPortMock);
+        ON_CALL(DeviceSettingsVideoPortMock::Mock(), Register(::testing::_, ::testing::_))
+            .WillByDefault(::testing::Return(Core::ERROR_NONE));
+        ON_CALL(DeviceSettingsVideoPortMock::Mock(), GetVideoPort(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::DoAll(::testing::SetArgReferee<2>(0), ::testing::Return(Core::ERROR_NONE)));
+        ON_CALL(DeviceSettingsVideoPortMock::Mock(), IsVideoPortDisplayConnected(::testing::_, ::testing::_))
+            .WillByDefault(::testing::DoAll(::testing::SetArgReferee<1>(true), ::testing::Return(Core::ERROR_NONE)));
 
-        p_displayMock  = new testing::NiceMock <DisplayMock>;
-        device::Display::setImpl(p_displayMock);
+        ON_CALL(DeviceSettingsDisplayMock::Mock(), Register(::testing::_, ::testing::A<Exchange::IDeviceSettingsDisplay::IDisplayHDMIHotPlugNotification*>()))
+            .WillByDefault(::testing::Invoke(
+                [&](const string&, Exchange::IDeviceSettingsDisplay::IDisplayHDMIHotPlugNotification* notification) {
+                    dsDisplayNotification = notification;
+                    return Core::ERROR_NONE;
+                }));
+        ON_CALL(DeviceSettingsDisplayMock::Mock(), Register(::testing::_, ::testing::A<Exchange::IDeviceSettingsDisplay::INotification*>()))
+            .WillByDefault(::testing::Return(Core::ERROR_NONE));
+        ON_CALL(DeviceSettingsDisplayMock::Mock(), GetDisplay(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::DoAll(::testing::SetArgReferee<2>(0), ::testing::Return(Core::ERROR_NONE)));
+        ON_CALL(DeviceSettingsDisplayMock::Mock(), GetDisplayEdidBytes(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [](const int32_t, uint8_t edid[], const uint16_t edidLength) {
+                    if (edid != nullptr) {
+                        std::fill(edid, edid + edidLength, 0);
+                        if (edidLength > 9) {
+                            edid[8] = 0x1E;
+                            edid[9] = 0x6D;
+                        }
+                    }
+                    return Core::ERROR_NONE;
+                }));
 
         p_libCCECImplMock  = new testing::NiceMock <LibCCECImplMock>;
         LibCCEC::setImpl(p_libCCECImplMock);
@@ -369,24 +397,43 @@ protected:
                         return &comLinkMock;
                     }));
 
+        ON_CALL(service, Register(::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [&](PluginHost::IPlugin::INotification* notification) {
+                    notification->Activated("org.rdk.DeviceSettings", &service);
+                }));
+
+        ON_CALL(service, QueryInterface(::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [&](const uint32_t id) -> void* {
+                    if (id == static_cast<uint32_t>(Exchange::IDeviceSettings::ID)) {
+                        auto* root = DeviceSettingsMock::Get();
+                        root->AddRef();
+                        return static_cast<void*>(static_cast<Exchange::IDeviceSettings*>(root));
+                    }
+                    return nullptr;
+                }));
+
+        ON_CALL(service, QueryInterfaceByCallsign(::testing::_, ::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [&](const uint32_t, const string&) -> void* {
+                    auto* root = DeviceSettingsMock::Get();
+                    root->AddRef();
+                    return static_cast<Exchange::IDeviceSettings*>(root);
+                }));
+
+        ON_CALL(comLinkMock, Instantiate(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::Invoke(
+                [&](const RPC::Object&, const uint32_t, uint32_t&) -> void* {
+                    HdmiCecSourceImplementationImpl =
+                        Core::ProxyType<Plugin::HdmiCecSourceImplementation>::Create();
+                    return &HdmiCecSourceImplementationImpl;
+                }));
+
         //OnCall required for intialize to run properly
         ON_CALL(*p_messageEncoderMock, encode(::testing::Matcher<const DataBlock&>(::testing::_)))
             .WillByDefault(::testing::ReturnRef(CECFrame::getInstance()));
 
-        ON_CALL(*p_videoOutputPortMock, getDisplay())
-            .WillByDefault(::testing::ReturnRef(device::Display::getInstance()));
-
-        ON_CALL(*p_videoOutputPortMock, isDisplayConnected())
-            .WillByDefault(::testing::Return(true));
-
-        ON_CALL(*p_hostImplMock, getVideoOutputPort(::testing::_))
-            .WillByDefault(::testing::ReturnRef(device::VideoOutputPort::getInstance()));
-
-        ON_CALL(*p_displayMock, getEDIDBytes(::testing::_))
-            .WillByDefault(::testing::Invoke(
-                [&](std::vector<uint8_t> &edidVec2) {
-                    edidVec2 = std::vector<uint8_t>({ 't', 'e', 's', 't' });
-                }));
         //Set enabled needs to be
         ON_CALL(*p_libCCECImplMock, getLogicalAddress(::testing::_))
             .WillByDefault(::testing::Return(0));
@@ -395,9 +442,9 @@ protected:
             .WillByDefault(::testing::Return());
         ON_CALL(*p_connectionImplMock, addFrameListener(::testing::_))
             .WillByDefault(::testing::Return());
-        EXPECT_CALL(*p_managerImplMock, Initialize())
-            .Times(::testing::AnyNumber())
-            .WillRepeatedly(::testing::Return());
+
+        Core::IWorkerPool::Assign(&(*workerPool));
+        workerPool->Run();
     }
     virtual ~HdmiCecSourceTest() override
     {
@@ -406,30 +453,6 @@ protected:
         {
             delete p_iarmBusImplMock;
             p_iarmBusImplMock = nullptr;
-        }
-        device::Manager::setImpl(nullptr);
-        if (p_managerImplMock != nullptr)
-        {
-            delete p_managerImplMock;
-            p_managerImplMock = nullptr;
-        }
-        device::Host::setImpl(nullptr);
-        if (p_hostImplMock != nullptr)
-        {
-            delete p_hostImplMock;
-            p_hostImplMock = nullptr;
-        }
-        device::VideoOutputPort::setImpl(nullptr);
-        if (p_videoOutputPortMock != nullptr)
-        {
-            delete p_videoOutputPortMock;
-            p_videoOutputPortMock = nullptr;
-        }
-        device::Display::setImpl(nullptr);
-        if (p_displayMock != nullptr)
-        {
-            delete p_displayMock;
-            p_displayMock = nullptr;
         }
         LibCCEC::setImpl(nullptr);
         if (p_libCCECImplMock != nullptr)
@@ -478,6 +501,8 @@ protected:
             delete p_telemetryApiImplMock;
             p_telemetryApiImplMock = nullptr;
         }
+
+        DeviceSettingsMock::Delete();
     }
 };
 
@@ -541,38 +566,6 @@ protected:
             plugin->QueryInterface(PLUGINHOST_DISPATCHER_ID));
         dispatcher->Activate(&service);
 
-        // Wrap mock calls to track thread activity from OnDisplayHDMIHotPlug
-        ON_CALL(*p_hostImplMock, getDefaultVideoPortName())
-            .WillByDefault(::testing::Invoke([this]() {
-                m_activeThreadCalls++;
-                auto result = std::string("HDMI0");
-                m_activeThreadCalls--;
-                return result;
-            }));
-
-        ON_CALL(*p_hostImplMock, getVideoOutputPort(::testing::_))
-            .WillByDefault(::testing::Invoke([this](const std::string& name) -> device::VideoOutputPort& {
-                m_activeThreadCalls++;
-                auto& result = device::VideoOutputPort::getInstance();
-                m_activeThreadCalls--;
-                return result;
-            }));
-
-        ON_CALL(*p_videoOutputPortMock, getDisplay())
-            .WillByDefault(::testing::Invoke([this]() -> device::Display& {
-                m_activeThreadCalls++;
-                auto& result = device::Display::getInstance();
-                m_activeThreadCalls--;
-                return result;
-            }));
-
-        ON_CALL(*p_displayMock, getEDIDBytes(::testing::_))
-            .WillByDefault(::testing::Invoke([this](std::vector<uint8_t>& edid) {
-                m_activeThreadCalls++;
-                // Use the standard helper function to provide valid EDID data
-                edid = createLGTVEdidBytes();
-                m_activeThreadCalls--;
-            }));
     }
 
     virtual ~HdmiCecSourceInitializedEventTest() override
@@ -1448,13 +1441,9 @@ TEST_F(HdmiCecSourceInitializedEventTest, hdmiEventHandler_connect)
         iCounter ++;
     }
 
-    EXPECT_CALL(*p_hostImplMock, getDefaultVideoPortName())
-    .Times(1)
-        .WillOnce(::testing::Return("TEST"));
-
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_CONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_CONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1469,7 +1458,7 @@ TEST_F(HdmiCecSourceInitializedEventTest, hdmiEventHandler_disconnect)
   
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_DISCONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_DISCONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1783,7 +1772,7 @@ TEST_F(HdmiCecSourceInitializedEventTest, pingDeviceUpdateList_Failure)
 {
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_DISCONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_DISCONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1792,7 +1781,7 @@ TEST_F(HdmiCecSourceInitializedEventTest, pingDeviceUpdateList_IOException)
 {
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_CONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_CONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1810,13 +1799,9 @@ TEST_F(HdmiCecSourceInitializedEventTest, hdmiEventHandler_connect_ExceptionHand
     .Times(::testing::AtLeast(1))
     .WillRepeatedly(::testing::Throw(std::runtime_error("sendTo failed")));
 
-    EXPECT_CALL(*p_hostImplMock, getDefaultVideoPortName())
-    .Times(1)
-    .WillOnce(::testing::Return("TEST"));
-
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_CONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_CONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1865,29 +1850,9 @@ TEST_F(HdmiCecSourceInitializedTest, addDevice_unspecifiedDevice)
 
 TEST_F(HdmiCecSourceInitializedEventTest, SetLgTV){
 
-    ON_CALL(*p_videoOutputPortMock, getDisplay())
-            .WillByDefault(::testing::ReturnRef(device::Display::getInstance()));
-
-    ON_CALL(*p_videoOutputPortMock, isDisplayConnected())
-        .WillByDefault(::testing::Return(true));
-
-    ON_CALL(*p_hostImplMock, getVideoOutputPort(::testing::_))
-        .WillByDefault(::testing::ReturnRef(device::VideoOutputPort::getInstance()));
-
-    ON_CALL(*p_displayMock, getEDIDBytes(::testing::_))
-        .WillByDefault(::testing::Invoke(
-            [this](std::vector<uint8_t> &edidVec2) {
-                m_activeThreadCalls++;
-                edidVec2 = createLGTVEdidBytes();
-                m_activeThreadCalls--;
-            }));
-    
-    ON_CALL(*p_hostImplMock, getDefaultVideoPortName())
-    .WillByDefault(::testing::Return("TEST"));
-
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_CONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_CONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 }
@@ -1900,29 +1865,9 @@ TEST_F(HdmiCecSourceInitializedEventTest, giveDeviceVendorIdProcess_LGTV){
            EXPECT_EQ(to.toInt(), 15);
         }));
     
-    ON_CALL(*p_videoOutputPortMock, getDisplay())
-            .WillByDefault(::testing::ReturnRef(device::Display::getInstance()));
-
-    ON_CALL(*p_videoOutputPortMock, isDisplayConnected())
-        .WillByDefault(::testing::Return(true));
-
-    ON_CALL(*p_hostImplMock, getVideoOutputPort(::testing::_))
-        .WillByDefault(::testing::ReturnRef(device::VideoOutputPort::getInstance()));
-
-    ON_CALL(*p_displayMock, getEDIDBytes(::testing::_))
-        .WillByDefault(::testing::Invoke(
-            [this](std::vector<uint8_t> &edidVec2) {
-                m_activeThreadCalls++;
-                edidVec2 = createLGTVEdidBytes();
-                m_activeThreadCalls--;
-            }));
-    
-    ON_CALL(*p_hostImplMock, getDefaultVideoPortName())
-    .WillByDefault(::testing::Return("TEST"));
-
     EVENT_SUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 
-    EXPECT_NO_THROW(Plugin::HdmiCecSourceImplementation::_instance->OnDisplayHDMIHotPlug(dsDISPLAY_EVENT_CONNECTED));
+    EXPECT_NO_THROW(dsDisplayNotification->OnDisplayHDMIHotPlug(Exchange::IDeviceSettingsDisplay::DS_DISPLAY_EVENT_CONNECTED));
 
     EVENT_UNSUBSCRIBE(0, _T("onHdmiHotPlug"), _T("client.events.onHdmiHotPlug"), message);
 

@@ -53,7 +53,7 @@ cd ..
 git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git
 cd "$GITHUB_WORKSPACE"
 
-git clone --branch 2.0.0 https://github.com/rdkcentral/entservices-testframework.git
+git clone --branch feature/RDKEMW-25013 https://github.com/rdkcentral/entservices-testframework.git
 
 ############################
 # Build Thunder-Tools
@@ -139,7 +139,6 @@ cd entservices-testframework/Tests
 echo " Empty mocks creation to avoid compilation errors"
 echo "======================================================================================"
 mkdir -p headers
-mkdir -p headers/rdk/ds
 mkdir -p headers/rdk/iarmbus
 mkdir -p headers/ccec
 mkdir -p headers/websocket
@@ -160,11 +159,6 @@ touch ccec/MessageDecoder.hpp
 touch ccec/MessageProcessor.hpp
 touch ccec/CECFrame.hpp
 touch ccec/MessageEncoder.hpp
-# Device Settings headers
-touch rdk/ds/dsDisplay.h
-touch rdk/ds/host.hpp
-touch rdk/ds/manager.hpp
-touch rdk/ds/videoOutputPort.hpp
 # IARM headers
 touch rdk/iarmbus/libIARM.h
 touch rdk/iarmbus/libIBus.h
