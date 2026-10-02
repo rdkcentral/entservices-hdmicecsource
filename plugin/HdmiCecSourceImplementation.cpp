@@ -1761,7 +1761,7 @@ namespace WPEFramework
                         queueSize = _instance->m_SendKeyQueue.size();
                     }
 
-                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%u \n",keyInfo.logicalAddr,keyInfo.keyCode, queueSize);
+                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%d \n",keyInfo.logicalAddr,keyInfo.keyCode, (int)queueSize);
     	            _instance->sendKeyPressEvent(keyInfo.logicalAddr,_instance->getUIKeyCode(keyInfo.keyCode));
 	                _instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
                 }

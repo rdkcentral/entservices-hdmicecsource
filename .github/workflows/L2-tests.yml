@@ -230,6 +230,7 @@ jobs:
           tvSettingsODM.h
           tvTypesODM.h
           tr181api.h
+          rdk/iarmbus/libIARM.h
           telemetry_busmessage_sender.h
           ccec/drivers/CecIARMBusMgr.h
           ccec/FrameListener.hpp
