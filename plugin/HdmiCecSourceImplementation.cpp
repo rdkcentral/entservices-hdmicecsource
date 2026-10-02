@@ -23,7 +23,7 @@
 #include "ccec/CECFrame.hpp"
 #include "ccec/MessageEncoder.hpp"
 // COM-RPC path: DeviceSettingsClientHelper provides VideoPort/Display access
-// host.hpp, dsDisplay.h, videoOutputPort.hpp, manager.hpp are NOT used here
+// DeviceSettings HAL headers are not used here; all DeviceSettings access is COM-RPC.
 
 #include "websocket/URL.h"
 
@@ -1725,7 +1725,8 @@ namespace WPEFramework
             if(!HdmiCecSourceImplementation::_instance)
                 return;
 
-	    SendKeyInfo keyInfo = {-1,-1};
+            SendKeyInfo keyInfo = {-1,-1};
+            size_t queueSize = 0;// queue size
 
             while(!_instance->m_sendKeyEventThreadExit)
             {
@@ -1733,6 +1734,7 @@ namespace WPEFramework
                 {
                     keyInfo.logicalAddr = -1;
                     keyInfo.keyCode = -1;
+                    queueSize = 0;// queue size
                     {
                         // Wait for a message to be added to the queue
                         std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
@@ -1742,19 +1744,24 @@ namespace WPEFramework
                     if (_instance->m_sendKeyEventThreadExit == true)
                     {
                         LOGINFO(" threadSendKeyEvent Exiting");
+                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
                         _instance->m_sendKeyEventThreadRun = false;
                         break;
                     }
 
-                    if (_instance->m_SendKeyQueue.empty()) {
-                        _instance->m_sendKeyEventThreadRun = false;
-                        continue;
+                    {
+                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
+                        if (_instance->m_SendKeyQueue.empty()) {
+                            _instance->m_sendKeyEventThreadRun = false;
+                            continue;
+                        }
+
+                        keyInfo = _instance->m_SendKeyQueue.front();
+                        _instance->m_SendKeyQueue.pop();
+                        queueSize = _instance->m_SendKeyQueue.size();
                     }
 
-                    keyInfo = _instance->m_SendKeyQueue.front();
-                    _instance->m_SendKeyQueue.pop();
-
-                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%d \n",keyInfo.logicalAddr,keyInfo.keyCode,(int)_instance->m_SendKeyQueue.size());
+                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%u \n",keyInfo.logicalAddr,keyInfo.keyCode, queueSize);
     	            _instance->sendKeyPressEvent(keyInfo.logicalAddr,_instance->getUIKeyCode(keyInfo.keyCode));
 	                _instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
                 }
