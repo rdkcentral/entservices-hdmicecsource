@@ -231,6 +231,7 @@ jobs:
           tvTypesODM.h
           tr181api.h
           rdk/iarmbus/libIARM.h
+          rdk/iarmbus/libIBus.h
           telemetry_busmessage_sender.h
           ccec/drivers/CecIARMBusMgr.h
           ccec/FrameListener.hpp
