@@ -390,7 +390,26 @@ namespace WPEFramework
                _powerManagerPlugin.Reset();
            }
            _registeredEventHandlers = false;
-           // COM-RPC path: Close DeviceSettings link (unregisters DSVideoPortNotification internally)
+
+           // DSHelper::Close() does NOT unregister notification sinks on our behalf (see
+           // DeviceSettingsInterface.h's documented dtor pattern) — do it ourselves first, otherwise
+           // DeviceSettings keeps a dangling pointer to these members and crashes with "pure virtual
+           // method called" when it later notifies/unregisters them against our already-destroyed object.
+           {
+               auto* vp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsVideoPort>();
+               if (vp) {
+                   vp->Unregister(&_dsVideoPortNotification);
+                   vp->Release();
+               }
+           }
+           {
+               auto* disp = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsDisplay>();
+               if (disp) {
+                   disp->Unregister(&_dsDisplayHotPlugNotification);
+                   disp->Release();
+               }
+           }
+           // COM-RPC path: Close DeviceSettings link
            DSHelper::Close();
     }
 
