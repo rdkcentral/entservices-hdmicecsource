@@ -673,6 +673,7 @@ jobs:
         run: >
           sudo mkdir -p -m 777
           /opt/persistent
+          /opt/persistent/ds
           /opt/secure
           /opt/secure/reboot
           /opt/secure/persistent
@@ -730,6 +731,9 @@ jobs:
           /tmp/block/sda/device/model
           /tmp/block/sdb/device/vendor
           /tmp/block/sdb/device/model
+          /opt/persistent/ds/cecData_2.json
+          /opt/uimgr_settings.bin
+          /tmp/pwrmgr_restarted
           &&
           sudo chmod -R 777
           /opt/standbyReason.txt
@@ -751,6 +755,9 @@ jobs:
           /tmp/bus/usb/devices/101-124/serial
           /tmp/block/sdb/device/vendor
           /tmp/block/sdb/device/model
+          /opt/persistent/ds/cecData_2.json
+          /opt/uimgr_settings.bin
+          /tmp/pwrmgr_restarted
           &&
           cd /dev/disk/by-id/
           &&
@@ -773,11 +780,13 @@ jobs:
           set +e
           export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}"
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}"
+          # NOTE: do NOT add "set follow-fork-mode child" / "set detach-on-fork off" here.
+          # The test fixtures shell out via std::system() (sudo fallback in createFile/removeFile).
+          # With those two settings gdb stops the whole session at the first vfork and this batch
+          # script has no "continue" after "run", so it jumps straight to "thread apply all bt full"
+          # on a process that never actually ran any tests (looks like every test hung/failed).
           gdb --batch --return-child-result \
             -ex "set pagination off" \
-            -ex "set follow-fork-mode child" \
-            -ex "set detach-on-fork off" \
-            -ex "set schedule-multiple on" \
             -ex "handle SIGABRT stop print nopass" \
             -ex "handle SIGSEGV stop print nopass" \
             -ex "set logging file gdb-stacktrace.log" \
@@ -788,8 +797,8 @@ jobs:
             --args RdkServicesL2Test
           test_status=$?
           echo "Copying test results and gdb stacktrace log to workspace"
-          cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json &&
-          cp -rf $(pwd)/gdb-stacktrace.log $GITHUB_WORKSPACE/gdb-stacktrace.log &&
+          cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json 2>/dev/null || true
+          cp -rf $(pwd)/gdb-stacktrace.log $GITHUB_WORKSPACE/gdb-stacktrace.log 2>/dev/null || true
           echo "Copied test results and gdb stacktrace log to workspace"
           exit "$test_status"
 
