@@ -232,7 +232,24 @@ jobs:
           tr181api.h
           rdk/iarmbus/libIARM.h
           rdk/iarmbus/libIBus.h
+          rdk/iarmbus/libIBusDaemon.h
+          rdk/iarmmgrs-hal/mfrMgr.h
+          rdk/iarmmgrs-hal/pwrMgr.h
+          rdk/iarmmgrs-hal/sysMgr.h
+          rdk/iarmbus/iarmUtil.h
+          rfcapi.h
+          rbus.h
+          libudev.h
+          libusb.h
+          drm.h
+          drm_mode.h
+          essos-resmgr.h
+          systemservices/proc/readproc.h
+          systemservices/secure_wrapper.h
           telemetry_busmessage_sender.h
+          systemaudioplatform.h
+          maintenanceMGR.h
+          pkg.h
           ccec/drivers/CecIARMBusMgr.h
           ccec/FrameListener.hpp
           ccec/Connection.hpp
