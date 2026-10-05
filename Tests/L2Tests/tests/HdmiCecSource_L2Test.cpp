@@ -18,13 +18,16 @@
  */
 #include "L2Tests.h"
 #include "L2TestsMock.h"
+#include <cerrno>
 #include <condition_variable>
+#include <cstdlib>
 #include <fstream>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <interfaces/IHdmiCecSource.h>
 // Used to change the power state for events
 #include <interfaces/IPowerManager.h>
+#include <unistd.h>
 
 #define EVNT_TIMEOUT (5000)
 #define HDMICECSOURCE_CALLSIGN _T("org.rdk.HdmiCecSource.1")
@@ -43,27 +46,72 @@ using IHdmiCecSourceDeviceListIterator = WPEFramework::Exchange::IHdmiCecSource:
 using PowerState = WPEFramework::Exchange::IPowerManager::PowerState;
 
 namespace {
+    static std::string shellQuote(const char* value)
+    {
+        std::string quoted("'");
+        for (const char* current = value; *current != '\0'; ++current) {
+            if (*current == '\'') {
+                quoted += "'\\''";
+            } else {
+                quoted += *current;
+            }
+        }
+        return quoted + "'";
+    }
+
+    static bool runSudo(const std::string& command)
+    {
+        return std::system(("sudo -n " + command).c_str()) == 0;
+    }
+
     static void removeFile(const char* fileName)
 	{
-		if (std::remove(fileName) != 0)
-		{
-			printf("File %s failed to remove\n", fileName);
-			perror("Error deleting file");
-		}
-		else
-		{
-			printf("File %s successfully deleted\n", fileName);
-		}
+        if (std::remove(fileName) == 0 || errno == ENOENT) {
+            return;
+        }
+        if (!runSudo("rm -f " + shellQuote(fileName))) {
+            printf("File %s failed to remove\n", fileName);
+            perror("Error deleting file");
+        }
 	}
-	
+
+    static bool tryPlainWrite(const char* fileName, const char* fileContent)
+    {
+        std::ofstream fileContentStream(fileName);
+        if (!fileContentStream.is_open()) {
+            return false;
+        }
+        fileContentStream << fileContent << "\n";
+        fileContentStream.close();
+        return !fileContentStream.fail();
+    }
+
 	static void createFile(const char* fileName, const char* fileContent)
 	{
-		removeFile(fileName);
+        if (tryPlainWrite(fileName, fileContent)) {
+            return;
+        }
 
-		std::ofstream fileContentStream(fileName);
-		fileContentStream << fileContent;
-		fileContentStream << "\n";
-		fileContentStream.close();
+        char temporaryName[] = "/tmp/hdmi-cec-source-XXXXXX";
+        const int descriptor = mkstemp(temporaryName);
+        if (descriptor < 0) {
+            printf("File %s failed to create\n", fileName);
+            return;
+        }
+        const std::string content = std::string(fileContent) + "\n";
+        const ssize_t written = write(descriptor, content.data(), content.size());
+        close(descriptor);
+
+        const std::string path(fileName);
+        const std::string directory = path.substr(0, path.find_last_of('/'));
+        const bool copied = written == static_cast<ssize_t>(content.size()) &&
+            runSudo("mkdir -p " + shellQuote(directory.c_str())) &&
+            runSudo("cp " + shellQuote(temporaryName) + " " + shellQuote(fileName)) &&
+            runSudo("chmod 666 " + shellQuote(fileName));
+        std::remove(temporaryName);
+        if (!copied) {
+            printf("File %s failed to create\n", fileName);
+        }
 	}
 
 class AsyncHandlerMock {
@@ -461,6 +509,14 @@ HdmiCecSource_L2Test::HdmiCecSource_L2Test()
                 *physAddress = (uint32_t)0x12345678;
             }));
 
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
+        .Times(::testing::AtMost(1))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
+        .Times(::testing::AtMost(1))
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+
     /* Activate plugin in constructor */
     uint32_t status = ActivateServiceWithRetry("org.rdk.PowerManager", 3, 500);
     EXPECT_EQ(Core::ERROR_NONE, status);
@@ -480,26 +536,23 @@ HdmiCecSource_L2Test::~HdmiCecSource_L2Test()
     ON_CALL(*p_connectionMock, close())
         .WillByDefault(::testing::Return());
 
-    sleep(5);
+    if (m_cecSourcePlugin != nullptr) {
+        m_cecSourcePlugin->Unregister(&m_notificationHandler);
+        m_cecSourcePlugin->Release();
+        m_cecSourcePlugin = nullptr;
+    }
+
+    if (m_controller_cecSource != nullptr) {
+        m_controller_cecSource->Release();
+        m_controller_cecSource = nullptr;
+    }
 
     // Deactivate services in reverse order
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
-        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
-
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
-        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
-
     status = DeactivateService("org.rdk.HdmiCecSource");
     EXPECT_EQ(Core::ERROR_NONE, status);
 
     status = DeactivateService("org.rdk.DeviceSettings");
     EXPECT_EQ(Core::ERROR_NONE, status);
-
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
-        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
-
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
-        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
 
     status = DeactivateService("org.rdk.PowerManager");
     EXPECT_EQ(Core::ERROR_NONE, status);
