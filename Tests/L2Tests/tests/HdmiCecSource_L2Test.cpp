@@ -536,16 +536,10 @@ HdmiCecSource_L2Test::~HdmiCecSource_L2Test()
     ON_CALL(*p_connectionMock, close())
         .WillByDefault(::testing::Return());
 
-    if (m_cecSourcePlugin != nullptr) {
-        m_cecSourcePlugin->Unregister(&m_notificationHandler);
-        m_cecSourcePlugin->Release();
-        m_cecSourcePlugin = nullptr;
-    }
-
-    if (m_controller_cecSource != nullptr) {
-        m_controller_cecSource->Release();
-        m_controller_cecSource = nullptr;
-    }
+    // Every test releases these per-test COM-RPC handles. Do not dereference
+    // the stale interface values during fixture teardown.
+    m_cecSourcePlugin = nullptr;
+    m_controller_cecSource = nullptr;
 
     // Deactivate services in reverse order
     status = DeactivateService("org.rdk.HdmiCecSource");

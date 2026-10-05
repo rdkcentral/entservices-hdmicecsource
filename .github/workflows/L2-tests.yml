@@ -772,7 +772,7 @@ jobs:
         run: >
           PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
           LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
-          gdb --batch --return-child-result -ex "set pagination off" -ex "run" -ex "thread apply all bt full" --args RdkServicesL2Test &&
+          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" gdb --batch --return-child-result -ex "set pagination off" -ex "run" -ex "thread apply all bt full" --args RdkServicesL2Test &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
@@ -788,7 +788,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          RdkServicesL2Test &&
+          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" RdkServicesL2Test &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
