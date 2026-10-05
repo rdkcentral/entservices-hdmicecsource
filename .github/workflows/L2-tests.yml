@@ -769,12 +769,29 @@ jobs:
 
       - name: Run unit tests without valgrind
         if: ${{ env.RDK_SERVICE_L2_TEST == 'ON'}}
-        run: >
-          PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
-          LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
-          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" gdb --batch --return-child-result -ex "set pagination off" -ex "run" -ex "thread apply all bt full" --args RdkServicesL2Test &&
+        run: |
+          set +e
+          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}"
+          gdb --batch --return-child-result \
+            -ex "set pagination off" \
+            -ex "set follow-fork-mode child" \
+            -ex "set detach-on-fork off" \
+            -ex "set schedule-multiple on" \
+            -ex "handle SIGABRT stop print nopass" \
+            -ex "handle SIGSEGV stop print nopass" \
+            -ex "set logging file gdb-stacktrace.log" \
+            -ex "set logging overwrite on" \
+            -ex "set logging enabled on" \
+            -ex "run" \
+            -ex "thread apply all bt full" \
+            --args RdkServicesL2Test
+          test_status=$?
+          echo "Copying test results and gdb stacktrace log to workspace"
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json &&
-          rm -rf $(pwd)/rdkL2TestResults.json
+          cp -rf $(pwd)/gdb-stacktrace.log $GITHUB_WORKSPACE/gdb-stacktrace.log &&
+          echo "Copied test results and gdb stacktrace log to workspace"
+          exit "$test_status"
 
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && env.RDK_SERVICE_L2_TEST == 'ON' && inputs.caller_source != 'testframework' }}
@@ -821,7 +838,7 @@ jobs:
           filtered_coverage.info
 
       - name: Upload artifacts
-        if: ${{ !env.ACT }}
+        if: ${{ always() && !env.ACT }}
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-L2-hdmicecsource
@@ -830,5 +847,6 @@ jobs:
             valgrind_log
             rdkL2TestResultsWithoutValgrind.json
             rdkL2TestResultsWithValgrind.json
+            gdb-stacktrace.log
           if-no-files-found: warn
 
