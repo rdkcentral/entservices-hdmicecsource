@@ -36,9 +36,12 @@ The HdmiCecSource plugin is a comprehensive HDMI-CEC (Consumer Electronics Contr
 
 #### 4. User Control Interface
 - **Remote Control Pass-Through**: Forward user commands to controlled devices
+- **CEC Key Forwarding**: Incoming CEC User Control Pressed commands (opcodes 0x44/0x45) are automatically translated to Linux input events and injected into the system's input subsystem
+- **Supported CEC Remote Commands**: Navigation keys (Up, Down, Left, Right, Select), control keys (Back, Exit, Home, Menu, Setup), number keys (0-9), media playback controls (Play, Pause, Stop, Fast Forward, Rewind, Record), volume controls, and colored function buttons
 - **Volume Control**: Send volume adjustment commands
 - **Playback Control**: Media playback commands (play, pause, stop, etc.)
 - **Menu Navigation**: Navigate device menus remotely
+- **Seamless Remote Integration**: CEC remote control commands from connected devices are processed as if they were local key presses
 
 #### 5. OSD (On-Screen Display) Integration
 - **Device Name Display**: Query and display device names
@@ -112,6 +115,7 @@ The plugin exposes a comprehensive JSON-RPC interface for:
 - **IARM Bus**: System-wide event distribution in RDK
 - **Device Settings**: Hardware-level configuration access
 - **Power Manager**: Coordinated system power management
+- **Tools Plugin**: Integration with org.rdk.Tools for uinput injection of CEC remote key events
 - **Network Remote**: RESTful API for network-based control
 
 ### Developer Benefits

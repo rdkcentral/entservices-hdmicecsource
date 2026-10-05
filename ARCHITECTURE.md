@@ -112,6 +112,26 @@ HDMI Hardware → CEC Library → FrameListener → MessageProcessor → Impleme
 5. Implementation updates device state
 6. Plugin broadcasts event to subscribed clients
 
+### CEC Key Press Forwarding Flow
+```
+HDMI Hardware → CEC Library → SendKeyPressMsgEvent → mapCECKeyToLinuxKeyCode → Tools Plugin → Linux Input Subsystem (uinput)
+```
+
+1. CEC User Control Pressed command (opcode 0x44/0x45) received from HDMI device
+2. Implementation calls `SendKeyPressMsgEvent` with CEC key code
+3. CEC key code mapped to Linux key code via `mapCECKeyToLinuxKeyCode`
+4. Linux key code sent to Tools plugin using `ITools::GenerateRemoteKeys`
+5. Tools plugin injects key event into Linux input subsystem via uinput
+6. Key event available to applications as standard Linux input event
+
+Supported key mappings include:
+- Navigation: up, down, left, right, select
+- Menu: home, back, menu
+- Numbers: 0-9
+- Playback: play, pause, stop, fast-forward, rewind, record
+- Volume: volume up, volume down, mute
+- Function: colored buttons (red/green/yellow/blue), page up/down, info
+
 ## Plugin Framework Integration
 
 ### Thunder Plugin Lifecycle
@@ -140,6 +160,7 @@ The plugin exposes the `IHdmiCecSource` interface defined in Thunder interfaces:
 - **IARMBus**: RDK Inter-Application Resource Management
 - **Device Settings**: Hardware abstraction layer
 - **IPowerManager**: System power state management
+- **ITools** (org.rdk.Tools): Linux input event injection for CEC key forwarding
 
 ### Helper Utilities
 The plugin uses common RDK utilities from the `helpers/` directory:
