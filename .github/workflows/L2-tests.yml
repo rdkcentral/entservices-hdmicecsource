@@ -814,7 +814,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" RdkServicesL2Test &&
+          RdkServicesL2Test &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
