@@ -81,6 +81,9 @@ jobs:
             echo "COMPONENT_SLUG=$(yq -r '.component.slug' "$config_file")"
             echo "SOURCE_REPO=$(yq -r '.component.source_repo' "$config_file")"
             echo "COMPONENT_DIR=$(yq -r '.component.source_directory' "$config_file")"
+            echo "ARTIFACTORY_QEMU_IMAGE_URL=$(yq -r '.component.artifactory_qemu_image_url // ""' "$config_file")"
+            echo "QEMU_KERNEL_IMAGE_NAME=$(yq -r '.component.qemu_kernel_image_name // "bzImage"' "$config_file")"
+            echo "QEMU_ROOTFS_IMAGE_NAME=$(yq -r '.component.qemu_rootfs_image_name // "rootfs.ext4"' "$config_file")"
             echo "GITHUB_IMAGE_ASSET_NAME=$(yq -r '.component.image_asset_name' "$config_file")"
             echo "PLUGIN_CALLSIGN=$(yq -r '.component.plugin_callsign' "$config_file")"
             echo "BUILD_DEPENDENCY_SCRIPT=$(yq -r '.execution.dependency_script' "$config_file")"
@@ -244,91 +247,39 @@ jobs:
             lcov \
             gcovr
 
-      - name: Download and prepare default QEMU image
+      - name: Download vDevice QEMU image from Artifactory
         env:
-          GH_TOKEN: ${{ github.token }}
+          ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p "$QEMU_WORKDIR"
-          image_tar="$QEMU_WORKDIR/$GITHUB_IMAGE_ASSET_NAME"
-          extract_dir="$QEMU_WORKDIR/image"
-          image_repo="$SOURCE_REPO"
-          repo_image_tar="$GITHUB_WORKSPACE/$COMPONENT_DIR/$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME"
-          copied_image=false
+          image_url="${ARTIFACTORY_QEMU_IMAGE_URL:-${{ vars.ARTIFACTORY_QEMU_IMAGE_URL }}}"
+          image_url="${image_url%/}"
 
-          if [[ -f "$repo_image_tar" ]]; then
-            cp -f "$repo_image_tar" "$image_tar"
-            copied_image=true
-          fi
-
-          # Fallback 1: clone qemu branch and pull LFS image path.
-          if [[ "$copied_image" != "true" ]]; then
-            fallback_repo_dir="$QEMU_WORKDIR/fallback-repo"
-            rm -rf "$fallback_repo_dir"
-
-            if git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" "https://github.com/${image_repo}.git" "$fallback_repo_dir";then
-              if command -v git-lfs >/dev/null 2>&1; then
-                (
-                  cd "$fallback_repo_dir"
-                  git lfs install --local
-                  git lfs pull --include "$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME" || true
-                )
-              fi
-
-              fallback_image_tar="$fallback_repo_dir/$TESTS_DIRECTORY/qemu-images/$GITHUB_IMAGE_ASSET_NAME"
-              if [[ -f "$fallback_image_tar" ]]; then
-                cp -f "$fallback_image_tar" "$image_tar"
-                copied_image=true
-              fi
-            fi
-          fi
-
-          # Fallback 2: latest release asset.
-          if [[ "$copied_image" != "true" ]]; then
-            releases_api="https://api.github.com/repos/${image_repo}/releases/latest"
-            release_json="$(curl -sS -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$releases_api")"
-            asset_id="$(echo "$release_json" | jq -r --arg name "$GITHUB_IMAGE_ASSET_NAME" '.assets[] | select(.name == $name) | .id' | head -n 1)"
-
-            [[ -n "$asset_id" && "$asset_id" != "null" ]] || {
-              echo "ERROR: release asset $GITHUB_IMAGE_ASSET_NAME not found in ${image_repo}" >&2
-              echo "Available assets in latest release:" >&2
-              echo "$release_json" | jq -r '.assets[]?.name' | sed 's/^/  - /' >&2
-              exit 1
-            }
-
-            curl -sS -fL \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/octet-stream" \
-              "https://api.github.com/repos/${image_repo}/releases/assets/$asset_id" \
-              -o "$image_tar"
-            copied_image=true
-          else
-            echo "Using repository-local image tar from checkout"
-          fi
-
-          # Detect Git LFS pointer files before extraction.
-          if head -n 1 "$image_tar" | grep -q 'version https://git-lfs.github.com/spec/v1'; then
-            echo "ERROR: $image_tar is a Git LFS pointer, not the real artifact." >&2
-            echo "Ensure LFS objects are available for qemu image path." >&2
+          [[ -n "$image_url" ]] || {
+            echo "ERROR: Artifactory QEMU image URL is not set. Please configure artifactory_qemu_image_url in build-config.yml or ARTIFACTORY_QEMU_IMAGE_URL repository variable." >&2
             exit 1
+          }
+
+          echo "Downloading vDevice QEMU image from Artifactory: $image_url"
+          curl_auth=()
+          if [[ -n "${ARTIFACTORY_TOKEN:-}" ]]; then
+            curl_auth=(-H "Authorization: Bearer ${ARTIFACTORY_TOKEN}")
           fi
 
-          rm -rf "$extract_dir"
-          mkdir -p "$extract_dir"
-          if tar -tzf "$image_tar" >/dev/null 2>&1; then
-            tar -xzf "$image_tar" -C "$extract_dir"
-          else
-            tar -xf "$image_tar" -C "$extract_dir"
-          fi
+          echo "Downloading bzImage..."
+          curl -sS -fL --retry 3 "${curl_auth[@]}" \
+            "$image_url/${QEMU_KERNEL_IMAGE_NAME:-bzImage}" \
+            -o "$QEMU_WORKDIR/kernel.bin"
 
-          kernel_src="$(find "$extract_dir" -type f \( -name 'bzImage*' -o -name 'vmlinuz*' -o -name '*.bin' \) | head -n 1 || true)"
-          rootfs_src="$(find "$extract_dir" -type f \( -name '*.rootfs.ext4' -o -name 'rootfs.ext4' -o -name '*.ext4' \) | head -n 1 || true)"
+          echo "Downloading rootfs..."
+          curl -sS -fL --retry 3 "${curl_auth[@]}" \
+            "$image_url/${QEMU_ROOTFS_IMAGE_NAME:-rootfs.ext4}" \
+            -o "$QEMU_WORKDIR/rootfs.ext4"
 
-          [[ -n "$kernel_src" && -f "$kernel_src" ]] || { echo "Kernel image not found" >&2; exit 1; }
-          [[ -n "$rootfs_src" && -f "$rootfs_src" ]] || { echo "Rootfs image not found" >&2; exit 1; }
+          [[ -f "$QEMU_WORKDIR/kernel.bin" ]] || { echo "ERROR: Kernel image ($QEMU_WORKDIR/kernel.bin) not found" >&2; exit 1; }
+          [[ -f "$QEMU_WORKDIR/rootfs.ext4" ]] || { echo "ERROR: Rootfs image ($QEMU_WORKDIR/rootfs.ext4) not found" >&2; exit 1; }
 
-          cp -f "$kernel_src" "$QEMU_WORKDIR/kernel.bin"
-          cp -f "$rootfs_src" "$QEMU_WORKDIR/rootfs.ext4"
           chmod 644 "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
           ls -lh "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
 
