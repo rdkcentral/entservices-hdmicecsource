@@ -268,12 +268,12 @@ jobs:
           fi
 
           echo "Downloading bzImage..."
-          curl -sS -fL --retry 3 "${curl_auth[@]}" \
+          curl -vvv -fL --retry 3 "${curl_auth[@]}" \
             "$image_url/${QEMU_KERNEL_IMAGE_NAME:-bzImage}" \
             -o "$QEMU_WORKDIR/kernel.bin"
 
           echo "Downloading rootfs..."
-          curl -sS -fL --retry 3 "${curl_auth[@]}" \
+          curl -vvv -fL --retry 3 "${curl_auth[@]}" \
             "$image_url/${QEMU_ROOTFS_IMAGE_NAME:-rootfs.ext4}" \
             -o "$QEMU_WORKDIR/rootfs.ext4"
 
