@@ -8,8 +8,8 @@ component:
   slug: hdmicecsource
   source_repo: rdkcentral/entservices-hdmicecsource
   source_directory: entservices-hdmicecsource
-  artifactory_qemu_image_url: 'https://artifactory.comcast.com/artifactory/vdevicevendoripks-opkg'
-  qemu_kernel_image_name: 'bzImage--5.15.184+git0+9c4fc176ec_9a9d15d3fc-r0-vdevice_x86-64-mw-20260713132320.bin'
+  artifactory_qemu_image_url: 'https://partners.artifactory.comcast.com/artifactory/Qualcomm-XER5/qca-wifi-fw/qca-wifi-fw-QCA8074_v1.0-WLAN.HK.2.9-01979-QCAHKSWPL_SILICONZ-1/2.1'
+  qemu_kernel_image_name: 'qca-wifi-fw-QCA8074_v1.0-WLAN.HK.2.9-01979-QCAHKSWPL_SILICONZ-1-2.1.tar.bz2'
   qemu_rootfs_image_name: 'core-image-vdevice-xfce-vdevice_x86-64-mw-20260713132320.rootfs.ext4'
   image_asset_name: DefaultImage.tar.gz
   plugin_callsign: org.rdk.HdmiCecSource
