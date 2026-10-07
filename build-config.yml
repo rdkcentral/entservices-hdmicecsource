@@ -8,7 +8,7 @@ component:
   slug: hdmicecsource
   source_repo: rdkcentral/entservices-hdmicecsource
   source_directory: entservices-hdmicecsource
-  artifactory_qemu_image_url: 'https://artifactory.comcast.com:443/artifactory/vdevicevendoripks-opkg'
+  artifactory_qemu_image_url: 'https://artifactory.comcast.com/artifactory/vdevicevendoripks-opkg'
   qemu_kernel_image_name: 'bzImage--5.15.184+git0+9c4fc176ec_9a9d15d3fc-r0-vdevice_x86-64-mw-20260713132320.bin'
   qemu_rootfs_image_name: 'core-image-vdevice-xfce-vdevice_x86-64-mw-20260713132320.rootfs.ext4'
   image_asset_name: DefaultImage.tar.gz
