@@ -1926,9 +1926,9 @@ namespace WPEFramework
             case 0x00: return KEY_ENTER;   // SELECT
             
             // Media control keys
-            case 0x41: return KEY_KPPLUS;     // VOLUME_UP
-            case 0x42: return KEY_KPMINUS;    // VOLUME_DOWN
-            case 0x43: return KEY_KPASTERISK; // MUTE
+case 0x41: return KEY_VOLUMEUP;     // VOLUME_UP
+            case 0x42: return KEY_VOLUMEDOWN;   // VOLUME_DOWN
+            case 0x43: return KEY_MUTE;         // MUTE
             case 0x44: return KEY_UNKNOWN;    // RESTORE_VOLUME_FUNCTION
             
             // Playback control keys
