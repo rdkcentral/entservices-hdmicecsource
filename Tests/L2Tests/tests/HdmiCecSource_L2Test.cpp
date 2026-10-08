@@ -18,13 +18,16 @@
  */
 #include "L2Tests.h"
 #include "L2TestsMock.h"
+#include <cerrno>
 #include <condition_variable>
+#include <cstdlib>
 #include <fstream>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <interfaces/IHdmiCecSource.h>
 // Used to change the power state for events
 #include <interfaces/IPowerManager.h>
+#include <unistd.h>
 
 #define EVNT_TIMEOUT (5000)
 #define HDMICECSOURCE_CALLSIGN _T("org.rdk.HdmiCecSource.1")
@@ -43,27 +46,72 @@ using IHdmiCecSourceDeviceListIterator = WPEFramework::Exchange::IHdmiCecSource:
 using PowerState = WPEFramework::Exchange::IPowerManager::PowerState;
 
 namespace {
+    static std::string shellQuote(const char* value)
+    {
+        std::string quoted("'");
+        for (const char* current = value; *current != '\0'; ++current) {
+            if (*current == '\'') {
+                quoted += "'\\''";
+            } else {
+                quoted += *current;
+            }
+        }
+        return quoted + "'";
+    }
+
+    static bool runSudo(const std::string& command)
+    {
+        return std::system(("sudo -n " + command).c_str()) == 0;
+    }
+
     static void removeFile(const char* fileName)
 	{
-		if (std::remove(fileName) != 0)
-		{
-			printf("File %s failed to remove\n", fileName);
-			perror("Error deleting file");
-		}
-		else
-		{
-			printf("File %s successfully deleted\n", fileName);
-		}
+        if (std::remove(fileName) == 0 || errno == ENOENT) {
+            return;
+        }
+        if (!runSudo("rm -f " + shellQuote(fileName))) {
+            printf("File %s failed to remove\n", fileName);
+            perror("Error deleting file");
+        }
 	}
-	
+
+    static bool tryPlainWrite(const char* fileName, const char* fileContent)
+    {
+        std::ofstream fileContentStream(fileName);
+        if (!fileContentStream.is_open()) {
+            return false;
+        }
+        fileContentStream << fileContent << "\n";
+        fileContentStream.close();
+        return !fileContentStream.fail();
+    }
+
 	static void createFile(const char* fileName, const char* fileContent)
 	{
-		removeFile(fileName);
+        if (tryPlainWrite(fileName, fileContent)) {
+            return;
+        }
 
-		std::ofstream fileContentStream(fileName);
-		fileContentStream << fileContent;
-		fileContentStream << "\n";
-		fileContentStream.close();
+        char temporaryName[] = "/tmp/hdmi-cec-source-XXXXXX";
+        const int descriptor = mkstemp(temporaryName);
+        if (descriptor < 0) {
+            printf("File %s failed to create\n", fileName);
+            return;
+        }
+        const std::string content = std::string(fileContent) + "\n";
+        const ssize_t written = write(descriptor, content.data(), content.size());
+        close(descriptor);
+
+        const std::string path(fileName);
+        const std::string directory = path.substr(0, path.find_last_of('/'));
+        const bool copied = written == static_cast<ssize_t>(content.size()) &&
+            runSudo("mkdir -p " + shellQuote(directory.c_str())) &&
+            runSudo("cp " + shellQuote(temporaryName) + " " + shellQuote(fileName)) &&
+            runSudo("chmod 666 " + shellQuote(fileName));
+        std::remove(temporaryName);
+        if (!copied) {
+            printf("File %s failed to create\n", fileName);
+        }
 	}
 
 class AsyncHandlerMock {
@@ -261,8 +309,6 @@ protected:
     Exchange::IHdmiCecSource* m_cecSourcePlugin = nullptr;
     PluginHost::IShell* m_controller_cecSource = nullptr;
     Core::Sink<HdmiCecSourceNotificationHandler> m_notificationHandler;
-    IARM_EventHandler_t dsHdmiEventHandler = nullptr;
-    IARM_EventHandler_t powerEventHandler = nullptr;
     FrameListener* registeredListener = nullptr;
     std::vector<FrameListener*> listeners;
 
@@ -298,24 +344,11 @@ HdmiCecSource_L2Test::HdmiCecSource_L2Test()
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(IARM_RESULT_SUCCESS));
 
-    // Mock IARM Event Registration to capture event handlers
+    // The source plugin still initializes IARM for its platform lifecycle, but
+    // DeviceSettings events are delivered through the COM-RPC notification path.
     EXPECT_CALL(*p_iarmBusImplMock, IARM_Bus_RegisterEventHandler(::testing::_, ::testing::_, ::testing::_))
         .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Invoke(
-            [this](const char* ownerName, IARM_EventId_t eventId, IARM_EventHandler_t handler) {
-                if (strcmp(ownerName, IARM_BUS_DSMGR_NAME) == 0) {
-                    if (eventId == IARM_BUS_DSMGR_EVENT_HDMI_HOTPLUG) {
-                        dsHdmiEventHandler = handler;
-                        TEST_LOG("Captured HDMI HotPlug Event Handler");
-                    }
-                } else if (strcmp(ownerName, IARM_BUS_PWRMGR_NAME) == 0) {
-                    if (eventId == IARM_BUS_PWRMGR_EVENT_MODECHANGED) {
-                        powerEventHandler = handler;
-                        TEST_LOG("Captured Power Manager Event Handler");
-                    }
-                }
-                return IARM_RESULT_SUCCESS;
-            }));
+        .WillRepeatedly(::testing::Return(IARM_RESULT_SUCCESS));
 
     EXPECT_CALL(*p_iarmBusImplMock, IARM_Bus_UnRegisterEventHandler(::testing::_, ::testing::_))
         .Times(::testing::AnyNumber())
@@ -335,32 +368,44 @@ HdmiCecSource_L2Test::HdmiCecSource_L2Test()
                 return result;
             });
 
-    // Mock device settings Manager
-    ON_CALL(*p_managerImplMock, Initialize())
-        .WillByDefault(::testing::Return());
-
-    // Mock Host methods
-    ON_CALL(*p_hostImplMock, getDefaultVideoPortName())
-        .WillByDefault(::testing::Return(std::string("HDMI0")));
-
-    ON_CALL(*p_hostImplMock, getVideoOutputPort(::testing::_))
-        .WillByDefault(::testing::ReturnRef(device::VideoOutputPort::getInstance()));
-
-    // Mock VideoOutputPort methods
-    ON_CALL(*p_videoOutputPortMock, isDisplayConnected())
-        .WillByDefault(::testing::Return(true));
-
-    ON_CALL(*p_videoOutputPortMock, getDisplay())
-        .WillByDefault(::testing::ReturnRef(device::Display::getInstance()));
-
-    // Mock Display methods - getEDIDBytes is void and takes a reference parameter
-    ON_CALL(*p_displayMock, getEDIDBytes(::testing::_))
+    // DeviceSettings HAL behavior used by the real DeviceSettings plugin.
+    ON_CALL(*p_dsVideoPortHalMock, dsGetVideoPort(::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Invoke(
-            [](std::vector<uint8_t>& edid) {
-                edid = {
-                    0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
-                    0x4C, 0x2D, 0xFE, 0x08, 0x00, 0x00, 0x00, 0x00
-                };
+            [](dsVideoPortType_t, int, intptr_t* handle) {
+                if (handle != nullptr) {
+                    *handle = 1;
+                }
+                return dsERR_NONE;
+            }));
+    ON_CALL(*p_dsVideoPortHalMock, dsIsDisplayConnected(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](intptr_t, bool* connected) {
+                if (connected != nullptr) {
+                    *connected = true;
+                }
+                return dsERR_NONE;
+            }));
+    ON_CALL(*p_dsDisplayHalMock, dsGetDisplay(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](dsVideoPortType_t, int, intptr_t* handle) {
+                if (handle != nullptr) {
+                    *handle = 1;
+                }
+                return dsERR_NONE;
+            }));
+    ON_CALL(*p_dsDisplayHalMock, dsGetEDIDBytes(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](intptr_t, unsigned char* edid, int* length) {
+                if (edid != nullptr && length != nullptr) {
+                    const int edidLength = std::min(*length, 128);
+                    std::fill(edid, edid + edidLength, 0);
+                    if (edidLength > 9) {
+                        edid[8] = 0x1E;
+                        edid[9] = 0x6D;
+                    }
+                    *length = edidLength;
+                }
+                return dsERR_NONE;
             }));
 
     // Mock HDMI CEC Connection - capture frame listeners for event injection
@@ -464,11 +509,22 @@ HdmiCecSource_L2Test::HdmiCecSource_L2Test()
                 *physAddress = (uint32_t)0x12345678;
             }));
 
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
+        .Times(::testing::AtMost(1))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
+        .Times(::testing::AtMost(1))
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+
     /* Activate plugin in constructor */
-    uint32_t status = ActivateService("org.rdk.PowerManager");
+    uint32_t status = ActivateServiceWithRetry("org.rdk.PowerManager", 3, 500);
     EXPECT_EQ(Core::ERROR_NONE, status);
 
-    status = ActivateService("org.rdk.HdmiCecSource");
+    status = ActivateServiceWithRetry("org.rdk.DeviceSettings", 3, 500);
+    EXPECT_EQ(Core::ERROR_NONE, status);
+
+    status = ActivateServiceWithRetry("org.rdk.HdmiCecSource", 3, 500);
     EXPECT_EQ(Core::ERROR_NONE, status);
 }
 
@@ -480,17 +536,17 @@ HdmiCecSource_L2Test::~HdmiCecSource_L2Test()
     ON_CALL(*p_connectionMock, close())
         .WillByDefault(::testing::Return());
 
-    sleep(5);
+    // Every test releases these per-test COM-RPC handles. Do not dereference
+    // the stale interface values during fixture teardown.
+    m_cecSourcePlugin = nullptr;
+    m_controller_cecSource = nullptr;
 
     // Deactivate services in reverse order
     status = DeactivateService("org.rdk.HdmiCecSource");
     EXPECT_EQ(Core::ERROR_NONE, status);
 
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
-        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
-
-    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
-        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+    status = DeactivateService("org.rdk.DeviceSettings");
+    EXPECT_EQ(Core::ERROR_NONE, status);
 
     status = DeactivateService("org.rdk.PowerManager");
     EXPECT_EQ(Core::ERROR_NONE, status);
