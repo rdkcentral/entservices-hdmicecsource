@@ -441,8 +441,6 @@ namespace WPEFramework
             //CEC plugin functionalities will only work if CECmgr is available. If plugin Initialize failure upper layer will call dtor directly.
             InitializePowerManager(service);
 
-            // Tools plugin is acquired on demand per key injection to avoid stale COM-RPC pointers when the plugin restarts.
-
             // load persistence setting
             loadSettings();
             try
@@ -1827,8 +1825,6 @@ namespace WPEFramework
                (*index)->OnKeyReleaseEvent(logicalAddress);
                index++;
            }
-           
-           LOGINFO("Received key release event from logical address: %d", logicalAddress);
        }
 
     void HdmiCecSourceImplementation::SendKeyPressMsgEvent(const int logicalAddress,const int keyCode)
