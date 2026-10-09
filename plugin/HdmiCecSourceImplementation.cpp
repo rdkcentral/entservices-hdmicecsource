@@ -361,7 +361,6 @@ namespace WPEFramework
     , msgFrameListener(nullptr)
     , _pwrMgrNotification(*this)
     , _registeredEventHandlers(false)
-    , _toolsPlugin(nullptr)
     , _service(nullptr)
     {
         LOGWARN("ctor");
@@ -395,17 +394,12 @@ namespace WPEFramework
                _powerManagerPlugin->Unregister(_pwrMgrNotification.baseInterface<Exchange::IPowerManager::IModeChangedNotification>());
                _powerManagerPlugin.Reset();
            }
-           
-           // Cleanup Tools plugin
-           {
-               std::lock_guard<std::mutex> lock(_toolsPluginLock);
-               if(_toolsPlugin)
-               {
-                   _toolsPlugin->Release();
-                   _toolsPlugin = nullptr;
-               }
+
+           if (_service != nullptr) {
+               _service->Release();
+               _service = nullptr;
            }
-           
+
            _registeredEventHandlers = false;
            try
            {
@@ -421,29 +415,6 @@ namespace WPEFramework
            }
     }
 
-    void HdmiCecSourceImplementation::initializeToolsPlugin(PluginHost::IShell* service)
-    {
-        std::lock_guard<std::mutex> lock(_toolsPluginLock);
-        
-        if (_toolsPlugin != nullptr) {
-            return;
-        }
-
-        if (service == nullptr) {
-            LOGWARN("Service is null, cannot initialize Tools plugin");
-            return;
-        }
-
-        _toolsPlugin = service->QueryInterfaceByCallsign<Exchange::ITools>("org.rdk.Tools");
-        
-        if (_toolsPlugin != nullptr) {
-            LOGINFO("Successfully acquired ITools interface from Tools plugin");
-            _toolsPlugin->AddRef();
-        } else {
-            LOGDBG("Tools plugin (org.rdk.Tools) not available yet");
-        }
-    }
-
     Core::hresult HdmiCecSourceImplementation::Configure(PluginHost::IShell* service)
     {
         LOGINFO("Configure");
@@ -452,9 +423,14 @@ namespace WPEFramework
         PowerState pwrStatePrev = WPEFramework::Exchange::IPowerManager::POWER_STATE_UNKNOWN;
         Core::hresult res = Core::ERROR_GENERAL;
         string msg;
-        
+
+        if (_service != nullptr) {
+            _service->Release();
+            _service = nullptr;
+        }
         _service = service;
-        
+        _service->AddRef();
+
         if (Utils::IARM::init()) {
             //Initialize cecEnableStatus to false in ctor
             cecEnableStatus = false;
@@ -465,13 +441,7 @@ namespace WPEFramework
             //CEC plugin functionalities will only work if CECmgr is available. If plugin Initialize failure upper layer will call dtor directly.
             InitializePowerManager(service);
 
-            // Initialize Tools plugin for uinput key event handling
-            initializeToolsPlugin(service);
-            if (_toolsPlugin == nullptr) {
-                LOGWARN("Tools plugin not available at startup, will retry on first key press");
-            } else {
-                LOGINFO("Successfully initialized Tools plugin for uinput key event handling");
-            }
+            // Tools plugin is acquired on demand per key injection to avoid stale COM-RPC pointers when the plugin restarts.
 
             // load persistence setting
             loadSettings();
@@ -1869,14 +1839,10 @@ namespace WPEFramework
                 index++;
               }
            
-           // Send key press event to uinput via Tools plugin
-           if (_toolsPlugin == nullptr) {
-               if (_service != nullptr) {
-                   initializeToolsPlugin(_service);
-               }
-           }
-           
-           if (_toolsPlugin) {
+           // Send key press event to uinput via Tools plugin using a fresh COM-RPC request.
+           Exchange::ITools* toolsPlugin = (_service != nullptr) ? _service->QueryInterfaceByCallsign<Exchange::ITools>("org.rdk.Tools") : nullptr;
+
+           if (toolsPlugin != nullptr) {
                uint32_t linuxKeyCode = mapCECKeyToLinuxKeyCode(keyCode);
                if (linuxKeyCode != 0xFF) {  // KEY_UNSUPPORTED
                    std::vector<Exchange::RemoteKey> remoteKeys;
@@ -1885,9 +1851,9 @@ namespace WPEFramework
                    key.duration = 0.2;  // Set to 200ms instead of default 16s
                    key.delay = 0;
                    remoteKeys.push_back(key);
-                   
+
                    bool success = false;
-                   Core::hresult result = _toolsPlugin->GenerateRemoteKeys(remoteKeys, success);
+                   Core::hresult result = toolsPlugin->GenerateRemoteKeys(remoteKeys, success);
                    if (result == Core::ERROR_NONE && success) {
                        LOGINFO("Successfully sent CEC key 0x%x (Linux key 0x%x) with 200ms duration to uinput via Tools plugin", keyCode, linuxKeyCode);
                    } else {
@@ -1896,6 +1862,7 @@ namespace WPEFramework
                } else {
                    LOGINFO("Unsupported CEC key code: 0x%x", keyCode);
                }
+               toolsPlugin->Release();
            } else {
                LOGDBG("Tools plugin not available, CEC key event 0x%x not injected to uinput", keyCode);
            }
