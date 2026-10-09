@@ -1896,7 +1896,7 @@ namespace WPEFramework
 case 0x41: return KEY_VOLUMEUP;     // VOLUME_UP
             case 0x42: return KEY_VOLUMEDOWN;   // VOLUME_DOWN
             case 0x43: return KEY_MUTE;         // MUTE
-            case 0x44: return KEY_UNKNOWN;    // RESTORE_VOLUME_FUNCTION
+            case 0x44: return KEY_PLAY;         // PLAY
             
             // Playback control keys
             case 0x45: return KEY_PLAY;    // PLAY
@@ -1911,11 +1911,11 @@ case 0x41: return KEY_VOLUMEUP;     // VOLUME_UP
             case 0x09: return KEY_HOME;    // HOME
             case 0x0D: return KEY_ESC;     // BACK
             case 0x0F: return KEY_MENU;    // MENU
-            case 0x51: return KEY_SETUP;   // SETUP_MENU
+            case 0x0A: return KEY_SETUP;   // SETUP_MENU
             
             // TV power
             case 0x0C: return KEY_TV;      // TV
-            case 0x6D: return KEY_POWER;   // POWER
+            case 0x40: return KEY_POWER;   // POWER
             
             // Function keys
             case 0x32: return KEY_F9;      // INFO
@@ -1923,10 +1923,10 @@ case 0x41: return KEY_VOLUMEUP;     // VOLUME_UP
             case 0x38: return KEY_PAGEDOWN;// PAGE_DOWN
             
             // Colored buttons (often mapped to F keys)
-            case 0x6E: return KEY_F4;      // RED
-            case 0x6F: return KEY_F5;      // GREEN
-            case 0x70: return KEY_F6;      // YELLOW
-            case 0x71: return KEY_F7;      // BLUE
+            case 0x71: return KEY_F4;      // RED
+            case 0x72: return KEY_F5;      // GREEN
+            case 0x73: return KEY_F6;      // YELLOW
+            case 0x74: return KEY_F7;      // BLUE
             
             // Extra keys
             case 0x1A: return KEY_PREVIOUS; // PREVIOUS
