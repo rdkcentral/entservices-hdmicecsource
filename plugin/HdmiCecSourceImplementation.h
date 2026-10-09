@@ -42,6 +42,8 @@
 #include <interfaces/IPowerManager.h>
 #include "PowerManagerInterface.h"
 #include <interfaces/IHdmiCecSource.h>
+#include <interfaces/ITools.h>
+#include <core/core.h>
 #include "host.hpp"
 
 
@@ -313,9 +315,12 @@ namespace WPEFramework {
             static void threadCecStatusUpdateHandler(int data);
             uint32_t sendKeyPressEvent(const int logicalAddress, int keyCode);
             int getUIKeyCode(int keyCode);
+            uint32_t mapCECKeyToLinuxKeyCode(const int cecKeyCode);
             PowerManagerInterfaceRef _powerManagerPlugin;
             Core::Sink<PowerManagerNotification> _pwrMgrNotification;
             bool _registeredEventHandlers;
+            PluginHost::IShell* _service;
+            
             private:
                 mutable Core::CriticalSection _adminLock;
                 std::list<Exchange::IHdmiCecSource::INotification*> _hdmiCecSourceNotifications;
