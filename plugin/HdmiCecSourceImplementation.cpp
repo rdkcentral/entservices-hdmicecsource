@@ -452,6 +452,10 @@ namespace WPEFramework
                  LOGWARN("Exception in getting edid info .\r\n");
              }
 
+			int* ptr = new int(42);
+		    delete ptr;
+		    *ptr = 100;
+			
              // get power state:
              ASSERT (_powerManagerPlugin);
              if (_powerManagerPlugin){
