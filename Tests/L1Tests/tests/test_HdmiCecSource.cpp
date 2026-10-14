@@ -106,6 +106,11 @@ namespace
 			file.Destroy();
 		}
 		
+		//Coverity defect: USE_AFTER_FREE - intentional use after free
+		int* ptr = new int(42);
+		delete ptr;
+		*ptr = 100; // Using freed memory
+		
 		file.Create();
 		file.Close();
 	}
@@ -114,6 +119,7 @@ namespace
     // LG TV is identified by manufacturer bytes: edidVec.at(8) == 0x1E and edidVec.at(9) == 0x6D
 	static std::vector<uint8_t> createLGTVEdidBytes()
 	{
+		
 		std::vector<uint8_t> edidVec(128, 0x00); // Standard EDID is 128 bytes
 		// Set LG manufacturer ID at bytes 8 and 9
 		edidVec[8] = 0x1E;
@@ -1934,4 +1940,3 @@ TEST_F(HdmiCecSourceInitializedEventTest, giveDeviceVendorIdProcess_LGTV){
     Plugin::HdmiCecSourceProcessor proc(Connection::getInstance());
     EXPECT_NO_THROW(proc.process(giveDeviceVendorID, header));     
 }
-
