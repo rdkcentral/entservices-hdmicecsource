@@ -1299,7 +1299,7 @@ namespace WPEFramework
             try{
                 LogicalAddress addr = LibCCEC::getInstance().getLogicalAddress(DEV_TYPE_TUNER);
 
-                std::string logicalAddrDeviceType = DeviceType(LogicalAddress(addr).getType()).toString();
+                std::string logicalAddrDeviceType = DeviceType(addr.getType()).toString();
 
                 LOGINFO("logical address obtained is %d , saved logical address is %d ", addr.toInt(), logicalAddress.toInt());
 
@@ -1654,39 +1654,41 @@ namespace WPEFramework
 	}
 	void HdmiCecSourceImplementation::threadSendKeyEvent()
         {
-            if(!HdmiCecSourceImplementation::_instance)
+            HdmiCecSourceImplementation* instance = HdmiCecSourceImplementation::_instance;
+            if(!instance)
                 return;
 
 	    SendKeyInfo keyInfo = {-1,-1};
 
-            while(!_instance->m_sendKeyEventThreadExit)
+            while(!instance->m_sendKeyEventThreadExit)
             {
                 if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
                 {
                     keyInfo.logicalAddr = -1;
                     keyInfo.keyCode = -1;
                     // Wait for a message to be added to the queue
-                    std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
-                    _instance->m_sendKeyCV.wait(lk, []{return (_instance->m_sendKeyEventThreadRun == true);});
+                    std::unique_lock<std::mutex> lk(instance->m_sendKeyEventMutex);
+                    while (!instance->m_sendKeyEventThreadRun)
+                        instance->m_sendKeyCV.wait(lk);
 
-                    if (_instance->m_sendKeyEventThreadExit == true)
+                    if (instance->m_sendKeyEventThreadExit == true)
                     {
                         LOGINFO(" threadSendKeyEvent Exiting");
-                        _instance->m_sendKeyEventThreadRun = false;
+                        instance->m_sendKeyEventThreadRun = false;
                         break;
                     }
 
-                    if (_instance->m_SendKeyQueue.empty()) {
-                        _instance->m_sendKeyEventThreadRun = false;
+                    if (instance->m_SendKeyQueue.empty()) {
+                        instance->m_sendKeyEventThreadRun = false;
                         continue;
                     }
 
-                    keyInfo = _instance->m_SendKeyQueue.front();
-                    _instance->m_SendKeyQueue.pop();
+                    keyInfo = instance->m_SendKeyQueue.front();
+                    instance->m_SendKeyQueue.pop();
 
-                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%d \n",keyInfo.logicalAddr,keyInfo.keyCode,(int)_instance->m_SendKeyQueue.size());
-    	            _instance->sendKeyPressEvent(keyInfo.logicalAddr,_instance->getUIKeyCode(keyInfo.keyCode));
-	                _instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
+                    LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%d \n",keyInfo.logicalAddr,keyInfo.keyCode,(int)instance->m_SendKeyQueue.size());
+                    instance->sendKeyPressEvent(keyInfo.logicalAddr,instance->getUIKeyCode(keyInfo.keyCode));
+                    instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
                 }
                 else
                 {
