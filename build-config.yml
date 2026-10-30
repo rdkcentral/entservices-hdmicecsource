@@ -3,7 +3,7 @@
 version: 1
 
 component:
-  name: HDMI CEC Source
+  name: HDMI 
   # Lowercase identifier used for guest staging dirs, tar names and artifact names.
   slug: hdmicecsource
   source_repo: rdkcentral/entservices-hdmicecsource
