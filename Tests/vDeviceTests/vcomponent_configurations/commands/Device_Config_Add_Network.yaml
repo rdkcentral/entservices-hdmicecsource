@@ -33,53 +33,43 @@ HdmiCec:
       fault: no
       number_of_ports: 7
       active_source: false
+    # Fields sit beside "device:", not under it; the vComponent parser ignores them otherwise.
     device_map:
       - device:
-          name: "VTV"
-          language: "eng"
-          cec_version: "1.4"
-          device_type: "TV"
-          power_status: "on"
-          fault: no
-          port_id: 0
-          number_of_ports: 7
-          active_source: false
-          children:
-            - device:
-                name: "YAMAHA"
+        name: "VTV"
+        language: "eng"
+        cec_version: "1.4"
+        device_type: "TV"
+        power_status: "on"
+        fault: no
+        port_id: 0
+        number_of_ports: 7
+        active_source: false
+        children:
+          - device:
+            name: "YAMAHA"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "AudioSystem"
+            power_status: "on"
+            fault: no
+            port_id: 3
+            number_of_ports: 2
+            active_source: true
+            children:
+              - device:
+                name: "PIONEER"
                 language: "eng"
                 cec_version: "1.4"
-                device_type: "AudioSystem"
+                device_type: "PlaybackDevice"
                 power_status: "on"
                 fault: no
-                port_id: 3
-                number_of_ports: 2
-                active_source: true
-                children:
-                  - device:
-                      name: "PIONEER"
-                      language: "eng"
-                      cec_version: "1.4"
-                      device_type: "PlaybackDevice"
-                      power_status: "on"
-                      fault: no
-                      port_id: 1
-                      number_of_ports: 0
-                      active_source: false
-                      children: []
-                  - device:
-                      name: "GOOGLE"
-                      language: "eng"
-                      cec_version: "1.4"
-                      device_type: "PlaybackDevice"
-                      power_status: "standby"
-                      fault: no
-                      port_id: 2
-                      number_of_ports: 0
-                      active_source: false
-                      children: []
-            - device:
-                name: "IPSTB"
+                port_id: 1
+                number_of_ports: 0
+                active_source: false
+                children: []
+              - device:
+                name: "GOOGLE"
                 language: "eng"
                 cec_version: "1.4"
                 device_type: "PlaybackDevice"
@@ -89,80 +79,91 @@ HdmiCec:
                 number_of_ports: 0
                 active_source: false
                 children: []
-            - device:
-                name: "CECAdapter"
+          - device:
+            name: "IPSTB"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "PlaybackDevice"
+            power_status: "standby"
+            fault: no
+            port_id: 2
+            number_of_ports: 0
+            active_source: false
+            children: []
+          - device:
+            name: "CECAdapter"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "RecordingDevice"
+            power_status: "on"
+            fault: no
+            port_id: 0
+            number_of_ports: 2
+            active_source: false
+            children:
+              - device:
+                name: "GameConsole"
                 language: "eng"
                 cec_version: "1.4"
-                device_type: "RecordingDevice"
-                power_status: "on"
-                fault: no
-                port_id: 0
-                number_of_ports: 2
-                active_source: false
-                children:
-                  - device:
-                      name: "GameConsole"
-                      language: "eng"
-                      cec_version: "1.4"
-                      device_type: "PlaybackDevice"
-                      power_status: "on"
-                      fault: no
-                      port_id: 1
-                      number_of_ports: 0
-                      active_source: false
-                      children: []
-            - device:
-                name: "SAMSUNG"
-                language: "eng"
-                cec_version: "1.4"
-                device_type: "Tuner"
+                device_type: "PlaybackDevice"
                 power_status: "on"
                 fault: no
                 port_id: 1
                 number_of_ports: 0
                 active_source: false
                 children: []
-            - device:
-                name: "SONY"
-                language: "eng"
-                cec_version: "1.4"
-                device_type: "PlaybackDevice"
-                power_status: "on"
-                fault: no
-                port_id: 4
-                number_of_ports: 0
-                active_source: false
-                children: []
-            - device:
-                name: "LG"
-                language: "eng"
-                cec_version: "1.4"
-                device_type: "AudioSystem"
-                power_status: "on"
-                fault: no
-                port_id: 5
-                number_of_ports: 0
-                active_source: false
-                children: []
-            - device:
-                name: "PANASONIC"
-                language: "eng"
-                cec_version: "1.4"
-                device_type: "Tuner"
-                power_status: "on"
-                fault: no
-                port_id: 6
-                number_of_ports: 0
-                active_source: false
-                children: []
-            - device:
-                name: "DENON"
-                language: "eng"
-                cec_version: "1.4"
-                device_type: "RecordingDevice"
-                power_status: "on"
-                fault: no
-                port_id: 7
-                number_of_ports: 0
-                active_source: false
-                children: []
+          - device:
+            name: "SAMSUNG"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "Tuner"
+            power_status: "on"
+            fault: no
+            port_id: 1
+            number_of_ports: 0
+            active_source: false
+            children: []
+          - device:
+            name: "SONY"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "PlaybackDevice"
+            power_status: "on"
+            fault: no
+            port_id: 4
+            number_of_ports: 0
+            active_source: false
+            children: []
+          - device:
+            name: "LG"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "AudioSystem"
+            power_status: "on"
+            fault: no
+            port_id: 5
+            number_of_ports: 0
+            active_source: false
+            children: []
+          - device:
+            name: "PANASONIC"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "Tuner"
+            power_status: "on"
+            fault: no
+            port_id: 6
+            number_of_ports: 0
+            active_source: false
+            children: []
+          - device:
+            name: "DENON"
+            language: "eng"
+            cec_version: "1.4"
+            device_type: "RecordingDevice"
+            power_status: "on"
+            fault: no
+            port_id: 7
+            number_of_ports: 0
+            active_source: false
+            children: []
