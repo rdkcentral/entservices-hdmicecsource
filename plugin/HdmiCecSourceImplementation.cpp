@@ -296,6 +296,7 @@ namespace WPEFramework
              try
              { 
                  conn.sendTo(header.from, MessageEncoder().encode(ReportPowerStatus(PowerStatus(powerState.load()))));
+                 conn.sendTo(header.from, MessageEncoder().encode(SetOSDName(osdName)));
              } 
              catch(...)
              {
