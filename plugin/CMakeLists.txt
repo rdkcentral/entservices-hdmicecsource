@@ -27,7 +27,7 @@ set_source_files_properties(HdmiCecSource.cpp PROPERTIES COMPILE_FLAGS "-fexcept
 set_source_files_properties(HdmiCecSourceImplementation.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
 
 find_package(${NAMESPACE}Plugins REQUIRED)
-find_package(${NAMESPACE}Helpers REQUIRED)
+find_package(${NAMESPACE}Helpers CONFIG REQUIRED)
 find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 
