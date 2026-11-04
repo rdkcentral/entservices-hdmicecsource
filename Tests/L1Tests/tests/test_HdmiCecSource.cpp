@@ -1566,7 +1566,8 @@ TEST_F(HdmiCecSourceInitializedTest, PerformOTPAction_Success)
 TEST_F(HdmiCecSourceInitializedTest, PerformOTPAction_Failure)
 {
     EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("setOTPEnabled"), _T("{\"enabled\":false}"), response));
-    EXPECT_EQ(Core::ERROR_GENERAL, handler.Invoke(connection, _T("performOTPAction"), _T("{\"enabled\":true}"), response));
+    EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("performOTPAction"), _T("{\"enabled\":true}"), response));
+    EXPECT_EQ(response, string("{\"success\":false}"));
 }
 
 TEST_F(HdmiCecSourceInitializedEventTest, HdmiCecSourceFrameListener_notify_GetCECVersionMessage){
@@ -1738,7 +1739,8 @@ TEST_F(HdmiCecSourceInitializedTest, sendStandbyMessage_connectionFailure)
 TEST_F(HdmiCecSourceInitializedTest, sendStandbyMessage_NoConnection)
 {
     EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("setEnabled"), _T("{\"enabled\": false}"), response));
-    EXPECT_EQ(Core::ERROR_GENERAL, handler.Invoke(connection, _T("sendStandbyMessage"), _T("{}"), response));
+    EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("sendStandbyMessage"), _T("{}"), response));
+    EXPECT_EQ(response, string("{\"success\":false}"));
 }
 
 TEST_F(HdmiCecSourceSettingsTest, loadSettings_FileExists_AllParametersPresent)
@@ -1833,7 +1835,8 @@ TEST_F(HdmiCecSourceInitializedTest, PerformOTPAction_ExceptionHandling)
 TEST_F(HdmiCecSourceInitializedTest, PerformOTPAction_NoConnection)
 {
     EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("setOTPEnabled"), _T("{\"enabled\":false}"), response));
-    EXPECT_EQ(Core::ERROR_GENERAL, handler.Invoke(connection, _T("performOTPAction"), _T("{}"), response));
+    EXPECT_EQ(Core::ERROR_NONE, handler.Invoke(connection, _T("performOTPAction"), _T("{}"), response));
+    EXPECT_EQ(response, string("{\"success\":false}"));
 }
 
 TEST_F(HdmiCecSourceInitializedEventTest, powerModeChanged_ExceptionHandling)
