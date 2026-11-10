@@ -80,6 +80,8 @@ The HdmiCecSource plugin is a WPEFramework (Thunder) plugin that provides HDMI-C
   - Frame encoding/decoding
   - Connection management
   - Message types and structures
+  - DriverImpl delegates hardware operations through IHDMICecHal. HDMICecHalFactory selects HDMICecAidlHAL when the HDMI CEC AIDL service is registered with the Binder service manager, or HDMICecRdkVHAL for the legacy C HAL otherwise. Backend detection is cached for the process.
+  - The AIDL backend uses Binder service/controller calls and event callbacks; physical address retrieval uses Device Settings display EDID.
 - **IARM Bus**: Inter-process communication
   - Event propagation
   - System-wide notifications
