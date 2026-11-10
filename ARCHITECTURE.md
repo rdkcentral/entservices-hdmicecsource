@@ -43,6 +43,8 @@ The HdmiCecSource plugin is a WPEFramework (Thunder) plugin that provides HDMI-C
 └────────┘  └───────┘  └──────────┘
 ```
 
+The DS component is the DeviceSettings plugin, accessed over COM-RPC through `DeviceSettingsClientHelper` rather than direct DeviceSettings HAL calls.
+
 ### Component Breakdown
 
 #### 1. Plugin Layer (HdmiCecSource)
@@ -80,13 +82,12 @@ The HdmiCecSource plugin is a WPEFramework (Thunder) plugin that provides HDMI-C
   - Frame encoding/decoding
   - Connection management
   - Message types and structures
-- **IARM Bus**: Inter-process communication
-  - Event propagation
-  - System-wide notifications
-- **Device Settings (DS)**: Hardware abstraction
-  - Display port management
-  - Video output configuration
-  - HDMI connection status
+- **IARM Bus**: Platform lifecycle integration
+- **DeviceSettings Plugin (COM-RPC)**: Display and video-port access through `DeviceSettingsClientHelper`
+  - `IDeviceSettingsVideoPort` for video-port handles and display connection status
+  - `IDeviceSettingsDisplay` for display handles, EDID queries, and HDMI connect/disconnect notifications
+  - Resolution post-change notifications provide a secondary connect-only signal
+  - DeviceSettings activation triggers notification registration and asynchronous display-state initialization; deactivation clears cached handles
 
 ## Data Flow
 
@@ -138,7 +139,7 @@ The plugin exposes the `IHdmiCecSource` interface defined in Thunder interfaces:
 - **WPEFramework**: Core plugin infrastructure (R4.4.1+)
 - **CEC Library**: HDMI-CEC protocol implementation
 - **IARMBus**: RDK Inter-Application Resource Management
-- **Device Settings**: Hardware abstraction layer
+- **DeviceSettings Plugin**: COM-RPC display and video-port interfaces (`IDeviceSettingsDisplay`, `IDeviceSettingsVideoPort`)
 - **IPowerManager**: System power state management
 
 ### Helper Utilities
@@ -156,6 +157,7 @@ The plugin uses common RDK utilities from the `helpers/` directory:
 ### Thread Management
 - Main processing occurs on Thunder framework threads
 - CEC events handled asynchronously via FrameListener callback
+- DeviceSettings initialization and HDMI hot-plug events dispatched through the Thunder worker pool
 - Thread-safe device state management using mutexes and condition variables
 
 ### Device State Management
