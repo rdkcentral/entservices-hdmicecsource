@@ -1390,7 +1390,7 @@ namespace WPEFramework
             try{
                 LogicalAddress addr = LibCCEC::getInstance().getLogicalAddress(DEV_TYPE_TUNER);
 
-                std::string logicalAddrDeviceType = DeviceType(LogicalAddress(addr).getType()).toString();
+                std::string logicalAddrDeviceType = DeviceType(addr.getType()).toString();
 
                 LOGINFO("logical address obtained is %d , saved logical address is %d ", addr.toInt(), logicalAddress.toInt());
 
@@ -1741,13 +1741,14 @@ namespace WPEFramework
 	}
 	void HdmiCecSourceImplementation::threadSendKeyEvent()
         {
-            if(!HdmiCecSourceImplementation::_instance)
+            HdmiCecSourceImplementation* instance = HdmiCecSourceImplementation::_instance;
+            if (!instance)
                 return;
 
             SendKeyInfo keyInfo = {-1,-1};
             size_t queueSize = 0;// queue size
 
-            while(!_instance->m_sendKeyEventThreadExit)
+            while(!instance->m_sendKeyEventThreadExit)
             {
                 if(!(WPEFramework::Exchange::IPowerManager::POWER_STATE_STANDBY_DEEP_SLEEP == devicePowerState.load()))
                 {
@@ -1756,33 +1757,34 @@ namespace WPEFramework
                     queueSize = 0;// queue size
                     {
                         // Wait for a message to be added to the queue
-                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
-                        _instance->m_sendKeyCV.wait(lk, []{return (_instance->m_sendKeyEventThreadRun == true);});
+                        std::unique_lock<std::mutex> lk(instance->m_sendKeyEventMutex);
+                        while (!instance->m_sendKeyEventThreadRun)
+                            instance->m_sendKeyCV.wait(lk);
                     }
 
-                    if (_instance->m_sendKeyEventThreadExit == true)
+                    if (instance->m_sendKeyEventThreadExit == true)
                     {
                         LOGINFO(" threadSendKeyEvent Exiting");
-                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
-                        _instance->m_sendKeyEventThreadRun = false;
+                        std::unique_lock<std::mutex> lk(instance->m_sendKeyEventMutex);
+                        instance->m_sendKeyEventThreadRun = false;
                         break;
                     }
 
                     {
-                        std::unique_lock<std::mutex> lk(_instance->m_sendKeyEventMutex);
-                        if (_instance->m_SendKeyQueue.empty()) {
-                            _instance->m_sendKeyEventThreadRun = false;
+                        std::unique_lock<std::mutex> lk(instance->m_sendKeyEventMutex);
+                        if (instance->m_SendKeyQueue.empty()) {
+                            instance->m_sendKeyEventThreadRun = false;
                             continue;
                         }
 
-                        keyInfo = _instance->m_SendKeyQueue.front();
-                        _instance->m_SendKeyQueue.pop();
-                        queueSize = _instance->m_SendKeyQueue.size();
+                        keyInfo = instance->m_SendKeyQueue.front();
+                        instance->m_SendKeyQueue.pop();
+                        queueSize = instance->m_SendKeyQueue.size();
                     }
 
                     LOGINFO("sendRemoteKeyThread : logical addr:0x%x keyCode: 0x%x  queue size :%d \n",keyInfo.logicalAddr,keyInfo.keyCode, (int)queueSize);
-    	            _instance->sendKeyPressEvent(keyInfo.logicalAddr,_instance->getUIKeyCode(keyInfo.keyCode));
-	                _instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
+    	            instance->sendKeyPressEvent(keyInfo.logicalAddr,instance->getUIKeyCode(keyInfo.keyCode));
+	                instance->sendKeyReleaseEvent(keyInfo.logicalAddr);
                 }
                 else
                 {
