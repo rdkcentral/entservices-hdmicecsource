@@ -1813,6 +1813,7 @@ namespace WPEFramework
 
     void HdmiCecSourceImplementation::SendKeyPressMsgEvent(const int logicalAddress,const int keyCode)
        {
+		   LOGINFO("KeyPress event received");
            std::list<Exchange::IHdmiCecSource::INotification*>::const_iterator index(_hdmiCecSourceNotifications.begin());
               while (index != _hdmiCecSourceNotifications.end()) {
                 (*index)->OnKeyPressEvent(logicalAddress,keyCode);
