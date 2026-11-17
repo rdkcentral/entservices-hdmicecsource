@@ -7,8 +7,19 @@ git clone git@github.com:rdkcentral/entservices-hdmicecsource.git
 cd entservices-hdmicecsource/Tests/vDeviceTests
 
 EXECUTION:
-with time : python3 suiteManager.py -t hdmicecsource 
-without time: python3 suiteManager.py hdmicecsource
+with time : python3 SuitManager.py -t hdmicecsource
+without time: python3 SuitManager.py hdmicecsource
+
+HELP:
+python3 SuitManager.py -h
+python3 SuitManager.py --help
+python3 SuitManager.py hdmicecsource --help
+
+Help shows command syntax, available options, execution examples, environment
+settings, and all registered testcase IDs with names, generated from SUITES.
+Help does not activate plugins, initialize devices, or execute tests.
+There are no interactive prompts. A normal run executes every registered test
+in order; testcase IDs are informational, not arguments for selecting tests.
 
 Default Actions:
 Plugin activation is now done by default before suite execution:
@@ -35,18 +46,18 @@ Useful overrides:
 Examples:
 
 # when running directly inside QEMU guest (services on localhost)
-python3 suiteManager.py hdmicecsource
+python3 SuitManager.py hdmicecsource
 
 # when running from host against QEMU target IP
 export TARGET_HOST=192.168.1.50
 export JSONRPC_PORT=9998
 export VCOMPONENT_PORT=8080
-python3 suiteManager.py hdmicecsource
+python3 SuitManager.py hdmicecsource
 
 # full URL override form
 export WPEFRAMEWORK_JSONRPC_URL=http://192.168.1.50:9998/jsonrpc
 export VCOMPONENT_API_URL=http://192.168.1.50:8080/api/postKVP
-python3 suiteManager.py hdmicecsource
+python3 SuitManager.py hdmicecsource
 
 
 Troubleshooting:

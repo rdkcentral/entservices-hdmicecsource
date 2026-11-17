@@ -221,7 +221,40 @@ def run_suite(suite_name):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run HDMI CEC test suites")
+    test_case_help = "\n".join(
+        f"  {suite_name}:\n" + "\n".join(
+            f"    {test_id}: {description.replace('_', ' ')}"
+            for test_id, description in (
+                module_name.split("_", 1) for module_name in config["tests"]
+            )
+        )
+        for suite_name, config in SUITES.items()
+    )
+    parser = argparse.ArgumentParser(
+        description="Run HDMI CEC Source L3 test suites",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python3 %(prog)s hdmicecsource       Run all tests\n"
+            "  python3 %(prog)s -t hdmicecsource    Run all tests with timing\n"
+            "  python3 %(prog)s hdmicecsource --help\n"
+            "\n"
+            "Test case IDs (all registered tests run in order; IDs are not CLI arguments):\n"
+            f"{test_case_help}\n"
+            "\n"
+            "Execution:\n"
+            "  No interactive prompts. Help exits without running tests or contacting services.\n"
+            "  By default, the plugin is activated and Init_Devicelist_Populate runs first.\n"
+            "\n"
+            "Environment settings:\n"
+            "  AUTO_ACTIVATE_PLUGINS=0       Skip automatic plugin activation\n"
+            "  TARGET_HOST                  Host for both endpoints (default: 127.0.0.1)\n"
+            "  JSONRPC_PORT                 JSON-RPC port (default: 9998)\n"
+            "  VCOMPONENT_PORT              vComponent port (default: 8080)\n"
+            "  WPEFRAMEWORK_JSONRPC_URL      Full JSON-RPC URL override\n"
+            "  VCOMPONENT_API_URL           Full vComponent URL override\n"
+        ),
+    )
     parser.add_argument("suite", help=f"Test suite name. Available: {list(SUITES.keys())}")
     parser.add_argument("-t", "--timing", action="store_true", help="Enable timing output for passed test cases")
     
