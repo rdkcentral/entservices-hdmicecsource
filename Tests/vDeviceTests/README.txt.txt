@@ -13,10 +13,11 @@ single test: python3 SuiteManager.py hdmicecsource --test TCID01_Send_Standby_Me
 multiple tests: repeat --test for each required testcase
 
 Default Actions:
-Plugin activation is done once before suite execution and deactivation is
-attempted after the suite finishes, including setup or test failures:
+Plugin lifecycle is per-test. Before every selected test, the plugin is
+activated and Init_Devicelist_Populate is run. The plugin is deactivated after
+that test, including setup or test failures:
 - hdmicecsource -> Controller.1.activate(callsign=org.rdk.HdmiCecSource)
-- Init_Devicelist_Populate will be done.
+- Init_Devicelist_Populate -> test -> Controller.1.deactivate
 
 Disable default activation only if needed:
 - export AUTO_ACTIVATE_PLUGINS=0
