@@ -13,7 +13,7 @@
  * @dependencies
  *  - utils.py
  *  - HdmiCECSource_Curl.py
- *  - suiteManager.py
+ *  - SuiteManager.py
  *  - vcomponent_configurations/hdmicec/commands/*.yaml (for emulation-based scenarios)
  *
  * @expected_result
@@ -38,8 +38,6 @@ from utils import (
     send_curl_command,
         send_vcomponent_command,
         HDMICEC_CMD_BASE,
-        activate_plugin,
-        WPEFRAMEWORK_JSONRPC_URL,
         log_info,
         log_success,
         log_warning,
@@ -194,14 +192,6 @@ def run_test():
                CECVersion            -> addDevice(5) (idempotent confirmation)
     Step 3 – call getDeviceList and verify LA 5 is present with correct details.
     """
-
-    # ── Step 0: ensure plugin is active (standalone-safe) ───────────────────
-    log_info(f"Init_Devicelist_Populate Step 0: activate plugin org.rdk.HdmiCecSource via {WPEFRAMEWORK_JSONRPC_URL}")
-    if not activate_plugin("org.rdk.HdmiCecSource"):
-        log_error(f"Init_Devicelist_Populate Failed ❌: plugin activation failed (org.rdk.HdmiCecSource)")
-        return False
-    # Align with suiteManager startup guard to let CEC threads fully initialize.
-    time.sleep(6)
 
     # ── Step 1: configure ────────────────────────────────────────────────────
     log_info("Init_Devicelist_Populate Step 1: configure vcomponent network")
