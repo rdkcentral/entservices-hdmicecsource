@@ -7,6 +7,17 @@ git clone git@github.com:rdkcentral/entservices-hdmicecsource.git
 cd entservices-hdmicecsource/Tests/vDeviceTests
 
 EXECUTION:
+Help:
+python3 SuiteManager.py -h
+python3 SuiteManager.py --help
+python3 SuiteManager.py hdmicecsource --help
+
+Help shows syntax, options, examples, environment settings, and every registered
+testcase ID with its full module name, generated from SUITES.
+There are no interactive prompts. Help does not run tests, initialize devices,
+or contact services. Use full module names with --test, not bare IDs like TCID01.
+Repeat --test to run cases in the supplied order; otherwise all cases run.
+
 with time : python3 SuiteManager.py -t hdmicecsource
 without time: python3 SuiteManager.py hdmicecsource
 single test: python3 SuiteManager.py hdmicecsource --test TCID01_Send_Standby_Message

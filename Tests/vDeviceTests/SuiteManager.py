@@ -329,7 +329,49 @@ def run_suite(suite_name, selected_tests=None):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run HDMI CEC test suites")
+    test_case_help = "\n".join(
+        f"  {suite_name}:\n"
+        + "\n".join(f"    {module_name}" for module_name in config["tests"])
+        for suite_name, config in SUITES.items()
+    )
+    parser = argparse.ArgumentParser(
+        description="Run HDMI CEC Source L3 test suites",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python3 %(prog)s --help\n"
+            "  python3 %(prog)s hdmicecsource       Run all tests\n"
+            "  python3 %(prog)s -t hdmicecsource    Run all tests with timing\n"
+            "  python3 %(prog)s hdmicecsource --test TCID01_Send_Standby_Message\n"
+            "  python3 %(prog)s hdmicecsource --test TCID01_Send_Standby_Message "
+            "--test TCID02_Get_Devicelist\n"
+            "\n"
+            "Testcase IDs / module names (execution order):\n"
+            f"{test_case_help}\n"
+            "\n"
+            "Test selection:\n"
+            "  Without --test, all registered tests run in order.\n"
+            "  Supply the full module name, not a bare ID such as TCID01.\n"
+            "  Repeat --test to run multiple tests in the supplied order.\n"
+            "\n"
+            "Execution / prompts:\n"
+            "  No interactive prompts. Help exits without running tests or contacting services.\n"
+            "  For each test, HdmiCecSource is activated, Init_Devicelist_Populate runs,\n"
+            "  then the test runs and the plugin is deactivated.\n"
+            "  AUTO_ACTIVATE_PLUGINS=0 skips activation/deactivation, not initialization.\n"
+            "  A run with only passes and skips succeeds; failures return exit status 1.\n"
+            "\n"
+            "Environment settings:\n"
+            "  TARGET_HOST                  Endpoint host (default: 127.0.0.1)\n"
+            "  JSONRPC_PORT                 JSON-RPC port (default: 9998)\n"
+            "  WPEFRAMEWORK_JSONRPC_URL      Full JSON-RPC URL (highest priority)\n"
+            "  JSONRPC_URL                  Fallback full JSON-RPC URL\n"
+            "  VCOMPONENT_PORT              vComponent port (default: 8080)\n"
+            "  VCOMPONENT_API_URL           Full vComponent postKVP URL override\n"
+            "  HDMICEC_PLUGIN_INIT_WAIT      Activation wait in seconds (default: 6)\n"
+            "  PLUGIN_INIT_WAIT              Shared fallback for the activation wait\n"
+        ),
+    )
     parser.add_argument(
         "suite",
         help=f"Test suite name. Available: {list(SUITES.keys())}",
