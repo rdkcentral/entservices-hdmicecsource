@@ -30,7 +30,7 @@ on:
         default: "develop"
     secrets:
       RDK_PORTAL_USERNAME:
-        required: true
+        required: false
       RDK_PORTAL_TOKEN:
         required: true
 
@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: Validate RDK-E portal inputs
         env:
-          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME }}
+          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME || vars.RDK_PORTAL_USERNAME }}
           RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
         run: |
           set -euo pipefail
@@ -62,7 +62,7 @@ jobs:
             exit 1
           }
           [[ -n "$RDK_PORTAL_USERNAME" && -n "$RDK_PORTAL_TOKEN" ]] || {
-            echo "ERROR: configure RDK_PORTAL_USERNAME and RDK_PORTAL_TOKEN secrets." >&2
+            echo "ERROR: set RDK_PORTAL_USERNAME (variable or secret) and the RDK_PORTAL_TOKEN secret." >&2
             exit 1
           }
 
@@ -82,7 +82,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates
             YQ_VERSION="v4.44.3"
             curl -fsSL -o /usr/local/bin/yq \
-              "https://github.com/mikefarah/yq/releases/dowinstadnload/${YQ_VERSION}/yq_linux_amd64"
+              "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
             chmod +x /usr/local/bin/yq
           fi
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Download vDevice QEMU image from RDK-E portal
         env:
-          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME }}
+          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME || vars.RDK_PORTAL_USERNAME }}
           RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
         run: |
           set -euo pipefail
