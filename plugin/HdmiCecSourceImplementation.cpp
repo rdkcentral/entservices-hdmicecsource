@@ -119,7 +119,7 @@ namespace WPEFramework
                 MessageDecoder(processor).decode(in);
        }
 
-//=========================================== HdmiCecSourceProcessor =========================================
+//=========================================== HdmiCecS ourceProcessor =========================================
        void HdmiCecSourceProcessor::process (const ActiveSource &msg, const Header &header)
        {
              LOGINFO("Command: ActiveSource %s : %s  : %s \n",GetOpName(msg.opCode()),msg.physicalAddress.name().c_str(),msg.physicalAddress.toString().c_str());
