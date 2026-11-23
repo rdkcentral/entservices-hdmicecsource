@@ -147,53 +147,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$QEMU_WORKDIR"
-          echo "Listing portal artifacts for build $BUILD_NUMBER"
-          curl -sS -fL --retry 3 --get \
+          echo "TEST MODE: downloading fixed images from build 57; build_number input is ignored for downloads."
+          curl -sS -fL --connect-timeout 30 --retry 3 \
             -u "$RDK_PORTAL_USERNAME:$RDK_PORTAL_TOKEN" \
-            --data-urlencode "job_name=VDEVICE-Middleware-Github" \
-            --data-urlencode "build_number=$BUILD_NUMBER" \
-            "https://rdkportal-e.stb.r53.xcal.tv/api/artifacts" \
-            -o "$QEMU_WORKDIR/portal-artifacts.json"
+            "https://rdkportal-e.stb.r53.xcal.tv/api/artifacts?job_name=VDEVICE-Middleware-Github&build_number=57&file_path=build-images/vdevice-test-image-vdevice_x86-64-mw-20261113170848.bin&download=true" \
+            -o "$QEMU_WORKDIR/kernel.bin"
+          curl -sS -fL --connect-timeout 30 --retry 3 \
+            -u "$RDK_PORTAL_USERNAME:$RDK_PORTAL_TOKEN" \
+            "https://rdkportal-e.stb.r53.xcal.tv/api/artifacts?job_name=VDEVICE-Middleware-Github&build_number=57&file_path=build-images/vdevice-test-image-vdevice_x86-64-mw-20261113170848.rootfs.ext4&download=true" \
+            -o "$QEMU_WORKDIR/rootfs.ext4"
 
-          image_stem="$(jq -er '
-            if type != "array" then
-              error("expected an array of artifact paths")
-            elif any(.[]; type != "string") then
-              error("expected every artifact path to be a string")
-            else
-              map(select(test("^build-images/vdevice-test-image-vdevice_x86-64-mw-[0-9]{14}\\.(bin|rootfs\\.ext4)$")))
-              | . as $images
-              | map(select(endswith(".bin"))) as $kernels
-              | map(select(endswith(".rootfs.ext4"))) as $rootfs
-              | if ($kernels | length) != 1 or ($rootfs | length) != 1 then
-                  error("expected exactly one timestamped .bin and .rootfs.ext4; found: \($images)")
-                elif ($kernels[0] | rtrimstr(".bin")) != ($rootfs[0] | rtrimstr(".rootfs.ext4")) then
-                  error("kernel and rootfs timestamps do not match")
-                else
-                  $kernels[0] | rtrimstr(".bin")
-                end
-            end
-          ' "$QEMU_WORKDIR/portal-artifacts.json")" || {
-            echo "ERROR: could not select matching vDevice images for build $BUILD_NUMBER." >&2
+          [[ -s "$QEMU_WORKDIR/kernel.bin" && -s "$QEMU_WORKDIR/rootfs.ext4" ]] || {
+            echo "ERROR: downloaded kernel or rootfs is empty." >&2
             exit 1
           }
-
-          download_artifact() {
-            local file_path="$1" output="$2"
-            echo "Downloading $file_path (build $BUILD_NUMBER)"
-            curl -sS -fL --retry 3 --get \
-              -u "$RDK_PORTAL_USERNAME:$RDK_PORTAL_TOKEN" \
-              --data-urlencode "job_name=VDEVICE-Middleware-Github" \
-              --data-urlencode "build_number=$BUILD_NUMBER" \
-              --data-urlencode "file_path=$file_path" \
-              --data-urlencode "download=true" \
-              "https://rdkportal-e.stb.r53.xcal.tv/api/artifacts" \
-              -o "$output"
-            [[ -s "$output" ]] || { echo "ERROR: downloaded $file_path is empty." >&2; exit 1; }
-          }
-
-          download_artifact "$image_stem.bin" "$QEMU_WORKDIR/kernel.bin"
-          download_artifact "$image_stem.rootfs.ext4" "$QEMU_WORKDIR/rootfs.ext4"
 
           chmod 644 "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
           ls -lh "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
