@@ -1,42 +1,39 @@
-name: Generic Component Build Framework
+name: vDevice Image Tests and Coverage
 
 permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-      - 'sprint/**'
-      - 'release/**'
-      - 'topic/RDK*'
-      - 'test/**'
-  pull_request:
-    branches:
-      - main
-      - develop
-      - 'sprint/**'
-      - 'release/**'
-      - 'topic/RDK*'
-      - 'test/**'
   workflow_dispatch:
     inputs:
+      build_number:
+        description: "VDEVICE-Middleware-Github build number from the RDK-E portal"
+        required: true
+        type: string
       source_ref:
-        description: "Branch/tag/SHA of the component to build"
+        description: "Branch/tag/SHA containing configuration and test cases"
         required: false
         default: "develop"
   workflow_call:
     inputs:
+      build_number:
+        description: "VDEVICE-Middleware-Github build number from the RDK-E portal"
+        required: true
+        type: string
       source_ref:
-        description: "Branch/tag/SHA of the component to build"
+        description: "Branch/tag/SHA containing configuration and test cases"
         required: false
         type: string
         default: "develop"
+    secrets:
+      RDK_PORTAL_USERNAME:
+        required: true
+      RDK_PORTAL_TOKEN:
+        required: true
 
 jobs:
-  build-component:
-    name: Build configured component
+  test-image:
+    name: Test portal image and collect coverage
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/rdkcentral/docker-rdk-ci:latest
@@ -44,15 +41,32 @@ jobs:
       run:
         shell: bash
     env:
+      BUILD_NUMBER: ${{ inputs.build_number || vars.RDK_PORTAL_BUILD_NUMBER }}
       QEMU_WORKDIR: /tmp/qemu-artifacts
       SSH_HOST_PORT: '5522'
       WPEFRAMEWORK_HOST_PORT: '59998'
       VCOMPONENT_HOST_PORT: '58080'
 
     steps:
-      - name: Clone build framework configuration
+      - name: Validate RDK-E portal inputs
+        env:
+          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME }}
+          RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || {
+            echo "ERROR: build_number must contain only digits." >&2
+            exit 1
+          }
+          [[ -n "$RDK_PORTAL_USERNAME" && -n "$RDK_PORTAL_TOKEN" ]] || {
+            echo "ERROR: configure RDK_PORTAL_USERNAME and RDK_PORTAL_TOKEN secrets." >&2
+            exit 1
+          }
+
+      - name: Clone build framework configuration and tests
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.source_ref || github.ref_name }}
           path: build-framework
 
       - name: Load build framework configuration
@@ -65,7 +79,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates
             YQ_VERSION="v4.44.3"
             curl -fsSL -o /usr/local/bin/yq \
-              "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+              "https://github.com/mikefarah/yq/releases/dowinstadnload/${YQ_VERSION}/yq_linux_amd64"
             chmod +x /usr/local/bin/yq
           fi
 
@@ -76,153 +90,30 @@ jobs:
             exit 1
           }
 
+          mkdir -p "$QEMU_WORKDIR"
           {
-            echo "COMPONENT_NAME=$(yq -r '.component.name' "$config_file")"
             echo "COMPONENT_SLUG=$(yq -r '.component.slug' "$config_file")"
-            echo "SOURCE_REPO=$(yq -r '.component.source_repo' "$config_file")"
             echo "COMPONENT_DIR=$(yq -r '.component.source_directory' "$config_file")"
-            echo "ARTIFACTORY_QEMU_IMAGE_URL=$(yq -r '.component.artifactory_qemu_image_url // ""' "$config_file")"
-            echo "QEMU_KERNEL_IMAGE_NAME=$(yq -r '.component.qemu_kernel_image_name // "bzImage"' "$config_file")"
-            echo "QEMU_ROOTFS_IMAGE_NAME=$(yq -r '.component.qemu_rootfs_image_name // "rootfs.ext4"' "$config_file")"
-            echo "GITHUB_IMAGE_ASSET_NAME=$(yq -r '.component.image_asset_name' "$config_file")"
+            echo "QEMU_KERNEL_ARTIFACT_PATH=$(yq -r '.component.qemu_kernel_artifact_path // ""' "$config_file")"
+            echo "QEMU_ROOTFS_ARTIFACT_PATH=$(yq -r '.component.qemu_rootfs_artifact_path // ""' "$config_file")"
             echo "PLUGIN_CALLSIGN=$(yq -r '.component.plugin_callsign' "$config_file")"
-            echo "BUILD_DEPENDENCY_SCRIPT=$(yq -r '.execution.dependency_script' "$config_file")"
-            echo "BUILD_SCRIPT=$(yq -r '.execution.build_script' "$config_file")"
-            echo "TESTS_BRANCH=$(yq -r '.execution.tests_branch' "$config_file")"
             echo "TESTS_DIRECTORY=$(yq -r '.execution.tests_directory' "$config_file")"
             echo "TEST_ENTRYPOINT=$(yq -r '.execution.test_entrypoint' "$config_file")"
             echo "TEST_ENVIRONMENT=$(yq -r '.execution.test_environment // {} | to_entries | .[] | "\(.key)=\(.value)"' "$config_file" | tr '\n' ' ')"
-            echo "PLUGIN_SOURCE_ROOT=$(yq -r '.copy.plugin.source_root' "$config_file")"
-            echo "PLUGIN_SOURCE_PATTERN=$(yq -r '.copy.plugin.source_pattern' "$config_file")"
-            echo "PLUGIN_SOURCE_FILTER=$(yq -r '.copy.plugin.source_filter' "$config_file")"
-            echo "PLUGIN_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.plugin.artifact_directory' "$config_file")"
             echo "PLUGIN_GUEST_DIR=$(yq -r '.copy.plugin.guest_directory' "$config_file")"
-            echo "PLUGIN_STAGE_DIR=$(yq -r '.copy.plugin.stage_directory' "$config_file")"
-            # Space-separated lists; shared-object names never contain spaces.
-            echo "PLUGIN_LIBRARIES=$(yq -r '.copy.plugin.libraries[]' "$config_file" | tr '\n' ' ')"
             echo "PLUGIN_GUEST_GLOB=$(yq -r '.copy.plugin.guest_glob' "$config_file")"
-            echo "RUNTIME_SOURCE_ROOT=$(yq -r '.copy.runtime.source_root' "$config_file")"
-            echo "RUNTIME_SOURCE_PATTERN=$(yq -r '.copy.runtime.source_pattern' "$config_file")"
-            echo "RUNTIME_ARTIFACT_DIRECTORY=$GITHUB_WORKSPACE/$(yq -r '.component.source_directory' "$config_file")/$(yq -r '.copy.runtime.artifact_directory' "$config_file")"
-            echo "RUNTIME_GUEST_DIR=$(yq -r '.copy.runtime.guest_directory' "$config_file")"
-            echo "RUNTIME_STAGE_DIR=$(yq -r '.copy.runtime.stage_directory' "$config_file")"
-            echo "RUNTIME_EXCLUDE_PATTERNS=$(yq -r '.copy.runtime.exclude_patterns[]' "$config_file" | tr '\n' ' ')"
-            echo "RUNTIME_FORBIDDEN_PATTERNS=$(yq -r '.copy.runtime.forbidden_patterns[]' "$config_file" | tr '\n' ' ')"
-            echo "RUNTIME_GUEST_PROBE_PREFIXES=$(yq -r '.copy.runtime.guest_probe_prefixes[]' "$config_file" | tr '\n' ' ')"
-            echo "DEPLOY_RUNTIME_LIBS=$(yq -r '.copy.runtime.deploy' "$config_file")"
-            echo "REQUIRE_NEEDED_MATCH=$(yq -r '.copy.plugin.require_needed_match' "$config_file")"
-            echo "DIAGNOSTIC_SYMBOL_FILTER=$(yq -r '.diagnostics.symbol_filter' "$config_file")"
             echo "MIN_COVERAGE=$(yq -r '.coverage.minimum_coverage_threshold' "$config_file")"
             echo "COVERAGE_SOURCE_DIRECTORY=$(yq -r '.coverage.source_directory' "$config_file")"
-            echo "COVERAGE_EXTENSIONS=$(yq -r '.coverage.source_extensions' "$config_file")"
           } >> "$GITHUB_ENV"
 
-      - name: Clone configured component
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ inputs.source_ref || (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number)) || github.ref_name }}
-          path: ${{ env.COMPONENT_DIR }}
-
-      - name: Build dependency stack
-        working-directory: ${{ env.COMPONENT_DIR }}
-        run: |
-          bash -x "$BUILD_DEPENDENCY_SCRIPT"
-
-      - name: Build configured component
-        working-directory: ${{ env.COMPONENT_DIR }}
-        run: |
-          export CFLAGS="${CFLAGS:-} --coverage"
-          export CXXFLAGS="${CXXFLAGS:-} --coverage"
-          export LDFLAGS="${LDFLAGS:-} --coverage"
-          bash -x "$BUILD_SCRIPT"
-
-      - name: Clone configured test branch
+      - name: Validate configured test entrypoint
         run: |
           set -euo pipefail
-          git clone --depth 1 --single-branch --branch "$TESTS_BRANCH" \
-            "https://github.com/${SOURCE_REPO}.git" \
-            /tmp/qemu-tests-branch
-          echo "$TESTS_BRANCH branch $TESTS_DIRECTORY contents:"
-          ls "/tmp/qemu-tests-branch/$TESTS_DIRECTORY/"
-
-      - name: Collect configured artifacts
-        id: plugin
-        working-directory: ${{ env.COMPONENT_DIR }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$QEMU_WORKDIR" "$PLUGIN_ARTIFACT_DIRECTORY" "$RUNTIME_ARTIFACT_DIRECTORY"
-          find "$PLUGIN_SOURCE_ROOT" -type f -name "$PLUGIN_SOURCE_PATTERN" \
-            | grep "$PLUGIN_SOURCE_FILTER" | tee "$PLUGIN_ARTIFACT_DIRECTORY/so-list.txt"
-          test -n "$(ls -A "$PLUGIN_ARTIFACT_DIRECTORY/so-list.txt" 2>/dev/null || true)" || {
-            echo "ERROR: no plugin .so files found under install path" >&2
+          test_entrypoint="$GITHUB_WORKSPACE/build-framework/$TESTS_DIRECTORY/$TEST_ENTRYPOINT"
+          [[ -f "$test_entrypoint" ]] || {
+            echo "ERROR: test entrypoint not found in framework checkout: $test_entrypoint" >&2
             exit 1
           }
-
-          while IFS= read -r sofile; do
-            cp -f "$sofile" "$PLUGIN_ARTIFACT_DIRECTORY/"
-          done < "$PLUGIN_ARTIFACT_DIRECTORY/so-list.txt"
-
-          test -n "$(ls -A "$PLUGIN_ARTIFACT_DIRECTORY"/*.so 2>/dev/null || true)" || {
-            echo "ERROR: no copied plugin .so artifacts found" >&2
-            exit 1
-          }
-
-          # Collect runtime libraries that plugin may need at load time.
-          # Patterns from copy.runtime.exclude_patterns are never deployed: they
-          # already exist in the guest image and deploying this build's copies
-          # causes ABI mismatch crashes on restart.
-          runtime_exclude_args=()
-          for pattern in $RUNTIME_EXCLUDE_PATTERNS; do
-            runtime_exclude_args+=( ! -name "$pattern" )
-          done
-
-          find "$RUNTIME_SOURCE_ROOT" -maxdepth 1 \( -type f -o -type l \) -name "$RUNTIME_SOURCE_PATTERN" \
-            "${runtime_exclude_args[@]}" \
-            | grep -v -e "${PLUGIN_SOURCE_FILTER:-^$}" | tee "$RUNTIME_ARTIFACT_DIRECTORY/so-list.txt" || true
-          while IFS= read -r sofile; do
-            [[ -n "$sofile" ]] || continue
-            cp -f "$sofile" "$RUNTIME_ARTIFACT_DIRECTORY/"
-          done < "$RUNTIME_ARTIFACT_DIRECTORY/so-list.txt"
-
-          runtime_forbidden_args=()
-          for pattern in $RUNTIME_FORBIDDEN_PATTERNS; do
-            [[ ${#runtime_forbidden_args[@]} -eq 0 ]] || runtime_forbidden_args+=( -o )
-            runtime_forbidden_args+=( -name "$pattern" )
-          done
-
-          if [[ ${#runtime_forbidden_args[@]} -gt 0 ]] && \
-             find "$RUNTIME_ARTIFACT_DIRECTORY" -maxdepth 1 -type f \
-              \( "${runtime_forbidden_args[@]}" \) \
-              -print -quit | grep -q .; then
-            echo "ERROR: excluded runtime library entered deployment artifacts" >&2
-            exit 1
-          fi
-
-          # The CI toolchain's libstdc++ may be newer than the guest image's;
-          # deploy it so GLIBCXX symbol versions required by the plugin resolve.
-          host_stdcxx="$(gcc -print-file-name=libstdc++.so 2>/dev/null || true)"
-          if [[ -n "$host_stdcxx" && -e "$host_stdcxx" ]]; then
-            real_stdcxx="$(readlink -f "$host_stdcxx")"
-            cp -f "$real_stdcxx" "$RUNTIME_ARTIFACT_DIRECTORY/libstdc++.so.6"
-          fi
-
-          {
-            echo "===== built plugin artifacts ====="
-            for sofile in "$PLUGIN_ARTIFACT_DIRECTORY"/*.so; do
-              echo "--- $(basename "$sofile") ---"
-              ls -lh "$sofile"
-              sha256sum "$sofile"
-              ldd "$sofile" || true
-            done
-
-            echo "===== collected runtime libraries ====="
-            ls -lh "$RUNTIME_ARTIFACT_DIRECTORY"/ || true
-          } | tee "$QEMU_WORKDIR/plugin-artifact-manifest.txt"
-
-          mkdir -p artifacts/coverage
-          find . -type f -name "*.gcno" \-exec cp --parents {} artifacts/coverage/ \; \2>/dev/null || true
 
       - name: Install QEMU and SSH tools
         run: |
@@ -235,6 +126,7 @@ jobs:
             jq \
             ca-certificates \
             netcat-openbsd \
+            libarchive-tools \
             git-lfs
 
           command -v qemu-system-x86_64 >/dev/null
@@ -247,38 +139,36 @@ jobs:
             lcov \
             gcovr
 
-      - name: Download vDevice QEMU image from Artifactory
+      - name: Download vDevice QEMU image from RDK-E portal
         env:
-          ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+          RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME }}
+          RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p "$QEMU_WORKDIR"
-          image_url="${ARTIFACTORY_QEMU_IMAGE_URL:-${{ vars.ARTIFACTORY_QEMU_IMAGE_URL }}}"
-          image_url="${image_url%/}"
+          for path_var in QEMU_KERNEL_ARTIFACT_PATH QEMU_ROOTFS_ARTIFACT_PATH; do
+            [[ -n "${!path_var}" && "${!path_var}" != *REPLACE_ME* ]] || {
+              echo "ERROR: set $path_var in build-config.yml to the portal file_path." >&2
+              exit 1
+            }
+          done
 
-          [[ -n "$image_url" ]] || {
-            echo "ERROR: Artifactory QEMU image URL is not set. Please configure artifactory_qemu_image_url in build-config.yml or ARTIFACTORY_QEMU_IMAGE_URL repository variable." >&2
-            exit 1
+          download_artifact() {
+            local file_path="$1" output="$2"
+            echo "Downloading $file_path (build $BUILD_NUMBER)"
+            curl -sS -fL --retry 3 --get \
+              -u "$RDK_PORTAL_USERNAME:$RDK_PORTAL_TOKEN" \
+              --data-urlencode "job_name=VDEVICE-Middleware-Github" \
+              --data-urlencode "build_number=$BUILD_NUMBER" \
+              --data-urlencode "file_path=build-images/vdevice-test-image-vdevice_x86-64-mw-20261113170848.rootfs.ext4" \
+              --data-urlencode "download=true" \
+              "https://rdkportal-e.stb.r53.xcal.tv/api/artifacts" \
+              -o "$output"
+            [[ -s "$output" ]] || { echo "ERROR: downloaded $file_path is empty." >&2; exit 1; }
           }
 
-          echo "Downloading vDevice QEMU image from Artifactory: $image_url"
-          curl_auth=()
-          if [[ -n "${ARTIFACTORY_TOKEN:-}" ]]; then
-            curl_auth=(-H "Authorization: Bearer ${ARTIFACTORY_TOKEN}")
-          fi
-
-          echo "Downloading bzImage..."
-          curl -sS -fL --retry 3 "${curl_auth[@]}" \
-            "$image_url/${QEMU_KERNEL_IMAGE_NAME:-bzImage}" \
-            -o "$QEMU_WORKDIR/kernel.bin"
-
-          echo "Downloading rootfs..."
-          curl -sS -fL --retry 3 "${curl_auth[@]}" \
-            "$image_url/${QEMU_ROOTFS_IMAGE_NAME:-rootfs.ext4}" \
-            -o "$QEMU_WORKDIR/rootfs.ext4"
-
-          [[ -f "$QEMU_WORKDIR/kernel.bin" ]] || { echo "ERROR: Kernel image ($QEMU_WORKDIR/kernel.bin) not found" >&2; exit 1; }
-          [[ -f "$QEMU_WORKDIR/rootfs.ext4" ]] || { echo "ERROR: Rootfs image ($QEMU_WORKDIR/rootfs.ext4) not found" >&2; exit 1; }
+          download_artifact "$QEMU_KERNEL_ARTIFACT_PATH" "$QEMU_WORKDIR/kernel.bin"
+          download_artifact "$QEMU_ROOTFS_ARTIFACT_PATH" "$QEMU_WORKDIR/rootfs.ext4"
 
           chmod 644 "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
           ls -lh "$QEMU_WORKDIR/kernel.bin" "$QEMU_WORKDIR/rootfs.ext4"
@@ -319,6 +209,7 @@ jobs:
           nc -z -w2 127.0.0.1 "$SSH_HOST_PORT"
 
       - name: Wait for guest SSH login readiness
+        id: guest
         run: |
           set -euo pipefail
 
@@ -357,400 +248,14 @@ jobs:
           tail -n 120 "$QEMU_WORKDIR/serial.log" >&2 || true
           exit 1
 
-      - name: Copy latest plugin .so into booted QEMU image
-        run: |
-          set -euo pipefail
-          trap 'echo "ERROR in copy step at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
-
-          if [[ -f "$QEMU_WORKDIR/ssh-target.env" ]]; then
-            # shellcheck disable=SC1090
-            source "$QEMU_WORKDIR/ssh-target.env"
-          fi
-
-          selected_ssh_port="${QEMU_SSH_PORT:-$SSH_HOST_PORT}"
-          selected_ssh_user="${QEMU_SSH_USER:-root}"
-          guest_stage_dir="/tmp/${COMPONENT_SLUG}-ci"
-
-          # Artifact collection runs from the component checkout, while this
-          # step runs from the workspace root. Normalize configured relative
-          # paths here so the copy step always reads the collected artifacts.
-          if [[ "$PLUGIN_ARTIFACT_DIRECTORY" = /* ]]; then
-            plugin_artifact_directory="$PLUGIN_ARTIFACT_DIRECTORY"
-          else
-            plugin_artifact_directory="$GITHUB_WORKSPACE/$COMPONENT_DIR/$PLUGIN_ARTIFACT_DIRECTORY"
-          fi
-          if [[ "$RUNTIME_ARTIFACT_DIRECTORY" = /* ]]; then
-            runtime_artifact_directory="$RUNTIME_ARTIFACT_DIRECTORY"
-          else
-            runtime_artifact_directory="$GITHUB_WORKSPACE/$COMPONENT_DIR/$RUNTIME_ARTIFACT_DIRECTORY"
-          fi
-
-          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
-          ssh_key_arg=()
-
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
-            "rm -rf '$guest_stage_dir' && mkdir -p '$guest_stage_dir/$PLUGIN_STAGE_DIR' '$guest_stage_dir/$RUNTIME_STAGE_DIR' '$guest_stage_dir/gcno'"
-
-          plugin_files=("$plugin_artifact_directory"/*.so)
-          if [[ ! -e "${plugin_files[0]}" ]]; then
-            echo "ERROR: No plugin artifacts found at $plugin_artifact_directory/*.so" >&2
-            ls -lah "$plugin_artifact_directory"/ 2>/dev/null || true
-            exit 1
-          fi
-
-          # Stage plugins in /tmp first; only install to live path after checks pass.
-          for sofile in "${plugin_files[@]}"; do
-            copied=false
-            for try in 1 2 3; do
-              if scp "${ssh_key_arg[@]}" "${ssh_opts[@]}" -P "$selected_ssh_port" "$sofile" "$selected_ssh_user@127.0.0.1:$guest_stage_dir/$PLUGIN_STAGE_DIR/"; then
-                copied=true
-                break
-              fi
-              echo "SCP retry $try for $(basename "$sofile")" >&2
-              sleep 3
-            done
-            [[ "$copied" == "true" ]] || { echo "Failed to stage $(basename "$sofile") on guest" >&2; exit 1; }
-          done
-
-          # ---- Copy ALL .gcno files preserving their absolute build path ----
-          # gcov writes .gcda at runtime to the same absolute path recorded in the
-          # instrumented .so, so gcno must land at that exact path for lcov to match.
-          echo "===== Collecting .gcno files to copy into QEMU ====="
-          gcno_list_file="$QEMU_WORKDIR/gcno-files.txt"
-          # Exclude CMake compiler-probe artifacts (CompilerIdC/CompilerIdCXX); they carry no coverage.
-          find "$PWD/$COMPONENT_DIR" -type f -name "*.gcno" \
-            ! -path "*/CompilerId*" | sort > "$gcno_list_file"
-          gcno_count=$(wc -l < "$gcno_list_file" | tr -d ' ')
-          echo "Found $gcno_count plugin .gcno files:"
-          cat "$gcno_list_file"
-
-          if [[ "$gcno_count" -eq 0 ]]; then
-            echo "WARNING: no .gcno files found to copy; coverage data will not be generated" >&2
-          else
-            gcno_tar="$QEMU_WORKDIR/gcno-files.tar.gz"
-            # -P preserves absolute paths on both archive and extraction.
-            tar -czPf "$gcno_tar" -T "$gcno_list_file"
-
-            copied=false
-            for try in 1 2 3; do
-              if scp "${ssh_key_arg[@]}" "${ssh_opts[@]}" -P "$selected_ssh_port" \
-                 "$gcno_tar" "$selected_ssh_user@127.0.0.1:$guest_stage_dir/gcno/gcno-files.tar.gz"; then
-                copied=true
-                break
-              fi
-              echo "SCP retry $try for gcno-files.tar.gz" >&2
-              sleep 3
-            done
-            [[ "$copied" == "true" ]] || { echo "Failed to copy gcno archive to guest" >&2; exit 1; }
-            echo "Copied $gcno_count .gcno files (archived) to guest staging area"
-          fi
-
-          # ---- Check what component-related libs the guest already ships ----
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            echo "===== Guest-native component libraries ====="
-            for pat in '"$RUNTIME_GUEST_PROBE_PREFIXES"'; do
-              found=$(find /usr/lib /lib -maxdepth 2 -name "${pat}*" 2>/dev/null)
-              if [ -n "$found" ]; then
-                echo "$found" | while read -r f; do ls -lh "$f"; done
-              else
-                echo "  NOT FOUND: ${pat}*"
-              fi
-            done
-          ' 2>&1 | tee "$QEMU_WORKDIR/guest-native-libs.log" || true
-
-          # Validate staged plugins against target image before live replacement.
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            set -euo pipefail
-            stage_dir="'"$guest_stage_dir/$PLUGIN_STAGE_DIR"'"
-            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-            require_needed_match="'"$REQUIRE_NEEDED_MATCH"'"
-
-            shopt -s nullglob
-            staged_plugins=("$stage_dir"/*.so)
-            [[ ${#staged_plugins[@]} -gt 0 ]] || { echo "ERROR: no staged plugins found" >&2; exit 1; }
-
-            for staged in "${staged_plugins[@]}"; do
-              base="$(basename "$staged")"
-              live="$plugin_dir/$base"
-
-              if ldd "$staged" 2>/dev/null | grep -q "not found"; then
-                echo "ERROR: unresolved dependencies for $base" >&2
-                ldd "$staged" >&2 || true
-                exit 1
-              fi
-
-              if [[ -f "$live" ]]; then
-                readelf -d "$staged" 2>/dev/null | awk "/NEEDED/{print \$NF}" | sort > /tmp/new.needed.$base || true
-                readelf -d "$live" 2>/dev/null | awk "/NEEDED/{print \$NF}" | sort > /tmp/live.needed.$base || true
-
-                if ! diff -u /tmp/live.needed.$base /tmp/new.needed.$base >/tmp/needed.diff.$base; then
-                  echo "WARN: NEEDED libs differ for $base" >&2
-                  cat /tmp/needed.diff.$base >&2 || true
-                  if [[ "$require_needed_match" == "true" ]]; then
-                    echo "ERROR: refusing deployment due to NEEDED mismatch for $base" >&2
-                    exit 1
-                  fi
-                fi
-              fi
-            done
-
-            for staged in "${staged_plugins[@]}"; do
-              base="$(basename "$staged")"
-              live="$plugin_dir/$base"
-              if [[ -f "$live" ]]; then
-                cp -f "$live" "${live}.bak"
-                echo "Backed up: $live -> ${live}.bak"
-              fi
-              cp -f "$staged" "$live"
-              chmod 755 "$live" || true
-              echo "Installed: $staged -> $live"
-            done
-
-            command -v ldconfig >/dev/null 2>&1 && ldconfig || true
-          '
-          # ---- Install gcno files on guest at their original absolute paths ----
-          # Extracting with -P restores each .gcno to the exact build path recorded in
-          # the .so, so the .gcda files produced during the test run land right beside them.
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" \
-            -p "$selected_ssh_port" \
-            "$selected_ssh_user@127.0.0.1" '
-            set -euo pipefail
-
-            gcno_archive="'"$guest_stage_dir"'/gcno/gcno-files.tar.gz"
-            if [[ ! -f "$gcno_archive" ]]; then
-              echo "No gcno archive present on guest; skipping gcno install"
-              exit 0
-            fi
-
-            echo "===== Installing .gcno files on guest ====="
-            # Guest tar is BusyBox (no -P). It strips the leading "/", so extracting
-            # from / restores each .gcno at its original absolute build path.
-            tar -xzf "$gcno_archive" -C /
-
-            installed_count=$(tar -tzf "$gcno_archive" | grep -c "\.gcno$" || true)
-            echo "Installed $installed_count .gcno files at their original build paths:"
-            tar -tzf "$gcno_archive" | sed "s/^/  /"
-          '
-
-          # Copy runtime shared libraries needed by plugin loading (filtered to avoid framework conflicts).
-          runtime_lib_count=0
-          if [[ "${DEPLOY_RUNTIME_LIBS:-false}" == "true" ]]; then
-            for sofile in "$runtime_artifact_directory"/*.so*; do
-              [[ -f "$sofile" ]] || continue
-              runtime_lib_count=$((runtime_lib_count + 1))
-              copied=false
-              for try in 1 2 3; do
-                if scp "${ssh_key_arg[@]}" "${ssh_opts[@]}" -P "$selected_ssh_port" "$sofile" "$selected_ssh_user@127.0.0.1:$guest_stage_dir/$RUNTIME_STAGE_DIR/"; then
-                  copied=true
-                  break
-                fi
-                echo "SCP retry $try for runtime lib $(basename "$sofile")" >&2
-                sleep 3
-              done
-              [[ "$copied" == "true" ]] || { echo "Failed to stage runtime lib $(basename "$sofile") on guest" >&2; exit 1; }
-            done
-
-            if (( runtime_lib_count > 0 )); then
-              ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-                set -euo pipefail
-                stage_dir="'"$guest_stage_dir/$RUNTIME_STAGE_DIR"'"
-                runtime_dir="'"$RUNTIME_GUEST_DIR"'"
-                shopt -s nullglob
-                for lib in "$stage_dir"/*.so*; do
-                  base="$(basename "$lib")"
-                  cp -f "$lib" "$runtime_dir/$base"
-                  chmod 755 "$runtime_dir/$base" || true
-                  echo "Installed runtime lib: $runtime_dir/$base"
-                done
-                command -v ldconfig >/dev/null 2>&1 && ldconfig || true
-              '
-            fi
-            echo "Copied $runtime_lib_count plugin-specific runtime libraries to guest"
-          else
-            echo "Skipping runtime library deployment (DEPLOY_RUNTIME_LIBS=false)"
-          fi
-
-          # ---- Set RDK_PROFILE before activation probes ----
-          # Plugin Initialize() rejects profiles other than STB.
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            set -eu
-            if [ -f /etc/device.properties ]; then
-              if grep -q "^RDK_PROFILE=" /etc/device.properties; then
-                sed -i "s/^RDK_PROFILE=.*/RDK_PROFILE=STB/" /etc/device.properties
-              else
-                printf "\nRDK_PROFILE=STB\n" >> /etc/device.properties
-              fi
-            else
-              printf "RDK_PROFILE=STB\n" > /etc/device.properties
-            fi
-            echo "guest RDK_PROFILE: $(grep ^RDK_PROFILE= /etc/device.properties || true)"
-            systemctl restart WPEFramework 2>/dev/null || systemctl restart wpeframework 2>/dev/null || true
-          '
-          sleep 8
-
-          # ---- Step 1: post-deploy activation probe ----
-          echo "===== POST-DEPLOY: checking plugin activation state ====="
-          old_plugin_ok=false
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-            echo "===== Plugin files ====="
-            ls -lh "$plugin_dir"/'"$PLUGIN_GUEST_GLOB"' 2>/dev/null || echo "MISSING old plugin"
-            for lib in '"$PLUGIN_LIBRARIES"'; do
-              echo "===== $lib ldd ====="
-              ldd "$plugin_dir/$lib" 2>/dev/null || true
-              echo "===== $lib readelf NEEDED ====="
-              readelf -d "$plugin_dir/$lib" 2>/dev/null | grep NEEDED || true
-              echo "===== $lib exported symbols ====="
-              nm -D "$plugin_dir/$lib" 2>/dev/null | grep -E " T " | grep -iE "'"$DIAGNOSTIC_SYMBOL_FILTER"'" | head -n 20 || true
-            done
-            echo "===== Activation attempt ====="
-            curl -sS --connect-timeout 5 --max-time 10 \
-              -H "Content-Type: application/json" \
-              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"'"$PLUGIN_CALLSIGN"'\"}}" \
-              http://127.0.0.1:9998/jsonrpc 2>&1 || true
-          ' > "$QEMU_WORKDIR/baseline-old-plugin.log" 2>&1 || true
-          cat "$QEMU_WORKDIR/baseline-old-plugin.log"
-
-          if grep -q 'ERROR_OPENING_FAILED' "$QEMU_WORKDIR/baseline-old-plugin.log" 2>/dev/null; then
-            echo "WARNING: Deployed plugin fails to activate with ERROR_OPENING_FAILED" | tee -a "$QEMU_WORKDIR/baseline-old-plugin.log"
-            old_plugin_ok=false
-
-            # Capture the real dlopen() reason: WPEFramework logs the dlerror() string,
-            # and undefined symbols in the Implementation .so are the usual culprit.
-            echo "===== DIAGNOSING ERROR_OPENING_FAILED ====="
-            ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-              plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-              echo "----- WPEFramework journal (dlopen/load errors) -----"
-              journalctl -u WPEFramework -u wpeframework -n 200 --no-pager 2>/dev/null \
-                | grep -iE "'"$DIAGNOSTIC_SYMBOL_FILTER"'|dlopen|dlerror|undefined|cannot open|symbol|error opening|failed to load" | tail -n 60 || true
-              for lib in '"$PLUGIN_LIBRARIES"'; do
-                so="$plugin_dir/$lib"
-                echo "----- $so : unresolved NEEDED (ldd) -----"
-                ldd "$so" 2>/dev/null | grep -i "not found" || echo "  (all NEEDED resolved)"
-                echo "----- $so : undefined symbols (nm -D U) -----"
-                nm -D -C "$so" 2>/dev/null | grep " U " | head -n 60 || true
-                echo "----- $so : does it reference gcov? -----"
-                nm -D "$so" 2>/dev/null | grep -i "gcov" | head -n 20 || echo "  (no gcov symbols referenced)"
-              done
-            ' 2>&1 | tee "$QEMU_WORKDIR/plugin-open-failure-diagnostic.log" || true
-          else
-            old_plugin_ok=true
-          fi
-          echo "old_plugin_ok=$old_plugin_ok" >> "$QEMU_WORKDIR/plugin-debug.env"
-
-          # ---- Crash capture: "empty reply"/no result means WPEFramework SIGSEGV'd ----
-          # Identifies the faulting library/offset so a mock-vs-real ABI crash is visible.
-          if ! grep -q '"result"' "$QEMU_WORKDIR/baseline-old-plugin.log" 2>/dev/null; then
-            echo "===== DIAGNOSING WPEFramework CRASH (empty reply / no result) ====="
-            ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-              echo "----- dmesg: segfault/oops lines -----"
-              dmesg 2>/dev/null | grep -iE "segfault|general protection|traps|oops|core dump|WPEFramework|WPEProcess" | tail -n 40 || true
-              echo "----- WPEFramework service state -----"
-              systemctl is-active WPEFramework wpeframework 2>/dev/null || true
-              echo "----- WPEFramework journal (last 60) -----"
-              journalctl -u WPEFramework -u wpeframework -n 60 --no-pager 2>/dev/null | tail -n 60 || true
-              echo "----- coredumpctl (if present) -----"
-              command -v coredumpctl >/dev/null 2>&1 && coredumpctl list --no-pager 2>/dev/null | tail -n 10 || echo "  (no coredumpctl)"
-            ' 2>&1 | tee "$QEMU_WORKDIR/plugin-crash-diagnostic.log" || true
-          fi
-
-          # ---- Step 2: preserve rollback backup if missing ----
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-            for lib in '"$PLUGIN_LIBRARIES"'; do
-              pso="$plugin_dir/$lib"
-              if [[ -f "$pso" && ! -f "${pso}.bak" ]]; then
-                cp -f "$pso" "${pso}.bak"
-                echo "Backed up: $pso -> ${pso}.bak"
-              elif [[ -f "${pso}.bak" ]]; then
-                echo "Backup already exists: ${pso}.bak"
-              fi
-            done
-          ' || true
-
-          # ---- Step 3: host-side comparison: new vs old local build ----
-          echo "===== HOST: new plugin binary info ====="
-          for sofile in "$PLUGIN_ARTIFACT_DIRECTORY"/*.so; do
-            [[ -f "$sofile" ]] || continue
-            fname="$(basename "$sofile")"
-            echo "--- $fname ---"
-            file "$sofile"
-            ldd "$sofile" 2>/dev/null || echo "ldd not available on host or cross-compiled"
-            readelf -d "$sofile" 2>/dev/null | grep NEEDED || true
-            nm -D "$sofile" 2>/dev/null | grep -E " T " | grep -iE "$DIAGNOSTIC_SYMBOL_FILTER" | head -n 20 || true
-          done | tee "$QEMU_WORKDIR/new-plugin-host-info.log"
-
-          # ---- Step 4: refresh linker cache and compare on guest ----
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-            plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-            command -v ldconfig >/dev/null 2>&1 && ldconfig || true
-
-            echo "===== NEW plugin files after copy ====="
-            ls -lh "$plugin_dir"/'"$PLUGIN_GUEST_GLOB"' 2>/dev/null || true
-            for lib in '"$PLUGIN_LIBRARIES"'; do
-              so="$plugin_dir/$lib"
-              echo "===== NEW $lib ldd ====="
-              ldd "$so" 2>/dev/null || true
-              echo "===== NEW $lib readelf NEEDED ====="
-              readelf -d "$so" 2>/dev/null | grep NEEDED || true
-              echo "===== NEW $lib MISSING SYMBOLS (undefined) ====="
-              nm -D "$so" 2>/dev/null | grep " U " | head -n 40 || true
-            done
-            echo "===== WPEFramework version ====="
-            WPEFramework --version 2>/dev/null || dpkg -l | grep -i wpe 2>/dev/null | head -n 5 || true
-          ' > "$QEMU_WORKDIR/postcopy-plugin-compare.log" 2>&1 || true
-          cat "$QEMU_WORKDIR/postcopy-plugin-compare.log"
-
-          # ---- Step 5: test new plugin activation, fallback to old if it fails ----
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" 'sync; systemctl restart WPEFramework || systemctl restart wpeframework || true' || true
-          sleep 8
-
-          activate_result="$(ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
-            'curl -sS --connect-timeout 5 --max-time 10 -H "Content-Type: application/json" \
-             --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"'"$PLUGIN_CALLSIGN"'\"}}" \
-             http://127.0.0.1:9998/jsonrpc 2>&1 || true')"
-
-          echo "New plugin activation probe: $activate_result"
-
-          if echo "$activate_result" | grep -q 'ERROR_OPENING_FAILED'; then
-            echo "NOTICE: New plugin has unresolved dependencies in this image — reverting to old plugin for test run" | tee "$QEMU_WORKDIR/plugin-fallback.log"
-            ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
-              plugin_dir="'"$PLUGIN_GUEST_DIR"'"
-              for lib in '"$PLUGIN_LIBRARIES"'; do
-                pso="$plugin_dir/$lib"
-                if [[ -f "${pso}.bak" ]]; then
-                  cp -f "${pso}.bak" "$pso"
-                  echo "Restored: ${pso}.bak -> $pso"
-                fi
-              done
-              command -v ldconfig >/dev/null 2>&1 && ldconfig || true
-              sync
-              systemctl restart WPEFramework || systemctl restart wpeframework || true
-            ' || true
-            sleep 6
-            echo "FALLBACK_TO_OLD=true" >> "$QEMU_WORKDIR/plugin-debug.env"
-          else
-            echo "New plugin activated successfully" | tee -a "$QEMU_WORKDIR/plugin-debug.env"
-            echo "FALLBACK_TO_OLD=false" >> "$QEMU_WORKDIR/plugin-debug.env"
-          fi
-
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" "rm -rf '$guest_stage_dir'" || true
-
       - name: Capture WPEFramework pre-test diagnostics
-        if: always()
+        if: always() && steps.guest.outcome == 'success'
         run: |
           set -euo pipefail
-
-          if [[ -f "$QEMU_WORKDIR/ssh-target.env" ]]; then
-            # shellcheck disable=SC1090
-            source "$QEMU_WORKDIR/ssh-target.env"
-          fi
-          selected_ssh_port="${QEMU_SSH_PORT:-$SSH_HOST_PORT}"
-          selected_ssh_user="${QEMU_SSH_USER:-root}"
+          source "$QEMU_WORKDIR/ssh-target.env"
           ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
-          ssh_key_arg=()
 
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
+          ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
             echo "===== uname ====="
             uname -a || true
             echo "===== WPEFramework service status ====="
@@ -768,28 +273,16 @@ jobs:
               --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.status\"}" \
               http://127.0.0.1:9998/jsonrpc || true
           ' > "$QEMU_WORKDIR/pretest-wpeframework.log" 2>&1 || true
-          echo "Pre-test diagnostics saved to $QEMU_WORKDIR/pretest-wpeframework.log"
           cat "$QEMU_WORKDIR/pretest-wpeframework.log"
 
       - name: Validate configured vDevice testcases
         run: |
           set -euo pipefail
-
-          if [[ -f "$QEMU_WORKDIR/ssh-target.env" ]]; then
-            # shellcheck disable=SC1090
-            source "$QEMU_WORKDIR/ssh-target.env"
-          fi
-          selected_ssh_port="${QEMU_SSH_PORT:-$SSH_HOST_PORT}"
-          selected_ssh_user="${QEMU_SSH_USER:-root}"
+          source "$QEMU_WORKDIR/ssh-target.env"
           ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
-          ssh_key_arg=()
+          tests_dir="$GITHUB_WORKSPACE/build-framework/$TESTS_DIRECTORY"
 
-          # Use the latest qemu-branch vDeviceTests
-          tests_dir="/tmp/qemu-tests-branch/$TESTS_DIRECTORY"
-
-          # Set RDK profile on guest and restart WPEFramework so Profile.sh in SuitManager
-          # sees the profile already set and skips triggering its own restart window.
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" '
+          ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
             set -eu
             if [[ -f /etc/device.properties ]]; then
               if grep -q "^RDK_PROFILE=" /etc/device.properties; then
@@ -800,78 +293,61 @@ jobs:
             else
               printf "RDK_PROFILE=STB\n" > /etc/device.properties
             fi
-            echo "guest RDK_PROFILE: $(grep ^RDK_PROFILE= /etc/device.properties || true)"
-            # Restart WPEFramework now so it starts with the correct profile already applied.
-            systemctl restart WPEFramework 2>/dev/null || systemctl restart wpeframework 2>/dev/null || true
+            systemctl restart WPEFramework 2>/dev/null || systemctl restart wpeframework
           '
 
-          # Wait for WPEFramework HTTP service to respond on guest before establishing tunnel.
-          # Using curl is more reliable than nc on minimal guest images.
-          echo "Waiting for WPEFramework HTTP service on guest (127.0.0.1:9998/Service)..."
+          echo "Waiting for WPEFramework HTTP service on guest..."
           guest_jsonrpc_ready=false
           for attempt in $(seq 1 60); do
-            if ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
+            if ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" \
               'curl -sf --connect-timeout 3 --max-time 6 http://127.0.0.1:9998/Service >/dev/null 2>&1'; then
-              echo "WPEFramework HTTP service is up (attempt $attempt)"
               guest_jsonrpc_ready=true
               break
             fi
-            if (( attempt == 60 )); then
-              echo "ERROR: WPEFramework HTTP service not ready on guest within 5 minutes" >&2
-              ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1" \
-                'systemctl status WPEFramework wpeframework --no-pager 2>/dev/null | head -n 60 || true; journalctl -u WPEFramework -u wpeframework -n 60 --no-pager 2>/dev/null || true' >&2 || true
-              exit 1
-            fi
             sleep 5
           done
-          [[ "$guest_jsonrpc_ready" == "true" ]]
+          [[ "$guest_jsonrpc_ready" == "true" ]] || {
+            echo "ERROR: WPEFramework HTTP service did not become ready." >&2
+            exit 1
+          }
 
-          # Set up SSH tunnel for JSON-RPC and vComponent ports
           JSONRPC_TUNNEL_PORT=59999
           VCOMPONENT_TUNNEL_PORT=58081
-          ssh "${ssh_key_arg[@]}" "${ssh_opts[@]}" \
-            -o ExitOnForwardFailure=yes -fN \
+          ssh "${ssh_opts[@]}" \
+            -o ExitOnForwardFailure=yes -N \
             -L "127.0.0.1:${JSONRPC_TUNNEL_PORT}:127.0.0.1:9998" \
             -L "127.0.0.1:${VCOMPONENT_TUNNEL_PORT}:127.0.0.1:8080" \
-            -p "$selected_ssh_port" "$selected_ssh_user@127.0.0.1"
+            -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" &
+          tunnel_pid=$!
+          trap 'kill "$tunnel_pid" 2>/dev/null || true' EXIT
 
-          tunnel_pid="$(pgrep -f "127.0.0.1:${JSONRPC_TUNNEL_PORT}:127.0.0.1:9998" | head -n 1 || true)"
-          cleanup_tunnel() { [[ -n "${tunnel_pid:-}" ]] && kill "$tunnel_pid" 2>/dev/null || true; }
-          trap cleanup_tunnel EXIT
-
-          nc -z -w3 127.0.0.1 "$JSONRPC_TUNNEL_PORT"
-          nc -z -w3 127.0.0.1 "$VCOMPONENT_TUNNEL_PORT"
-
-          # Confirm JSON-RPC actually responds (not just port open) before handing to SuitManager.
-          echo "Confirming JSON-RPC HTTP response at http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc ..."
           jsonrpc_ready=false
           for attempt in $(seq 1 30); do
             if curl -sf --connect-timeout 3 --max-time 6 \
               -H "Content-Type: application/json" \
               --data '{"jsonrpc":"2.0","id":1,"method":"Controller.1.status"}' \
               "http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc" >/dev/null 2>&1; then
-              echo "JSON-RPC ready at attempt $attempt"
               jsonrpc_ready=true
               break
             fi
-            echo "JSON-RPC not yet responding, attempt $attempt/30 ..."
             sleep 3
           done
-          if [[ "$jsonrpc_ready" != "true" ]]; then
-            echo "ERROR: WPEFramework JSON-RPC not responding after 90s" >&2
+          [[ "$jsonrpc_ready" == "true" ]] || {
+            echo "ERROR: WPEFramework JSON-RPC not responding after 90s." >&2
             exit 1
-          fi
+          }
+          nc -z -w3 127.0.0.1 "$VCOMPONENT_TUNNEL_PORT"
 
-          # Explicitly activate the configured plugin before running the test entrypoint.
-          activate_result="$(curl -sS --connect-timeout 5 --max-time 10 \
+          activate_result="$(curl -sS -f --connect-timeout 5 --max-time 10 \
             -H "Content-Type: application/json" \
             --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.activate\",\"params\":{\"callsign\":\"$PLUGIN_CALLSIGN\"}}" \
-            "http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc" 2>&1 || true)"
+            "http://127.0.0.1:${JSONRPC_TUNNEL_PORT}/jsonrpc")"
           echo "Activation result (tunnel): $activate_result"
-          if echo "$activate_result" | grep -q 'ERROR_'; then
-            echo "ERROR: $PLUGIN_CALLSIGN activation failed before tests" >&2
+          jq -e 'has("result") and (has("error") | not) and (.result == 0 or .result == null)' \
+            <<< "$activate_result" >/dev/null || {
+            echo "ERROR: $PLUGIN_CALLSIGN activation failed before tests." >&2
             exit 1
-          fi
+          }
 
           export TARGET_HOST=127.0.0.1
           export JSONRPC_PORT="$JSONRPC_TUNNEL_PORT"
@@ -882,125 +358,86 @@ jobs:
           done
 
           cd "$tests_dir"
-          python3 "$TEST_ENTRYPOINT" | tee "$QEMU_WORKDIR/vdevice-tests.log"
+          python3 "$TEST_ENTRYPOINT" "$COMPONENT_SLUG" 2>&1 | tee "$QEMU_WORKDIR/vdevice-tests.log"
 
-      - name: Collect GCDA Files From Guest
-        if: always()
+      - name: Collect image coverage data from guest
+        id: coverage
+        if: always() && steps.guest.outcome == 'success'
         run: |
           set -euo pipefail
           source "$QEMU_WORKDIR/ssh-target.env"
           ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
 
-          # If the instrumented plugin was rolled back to the stock .so, no .gcda can ever appear.
-          if [[ -f "$QEMU_WORKDIR/plugin-debug.env" ]]; then
-            echo "===== Plugin deployment state ====="
-            cat "$QEMU_WORKDIR/plugin-debug.env"
-          fi
-
-          # gcov counters live in memory and are only written to .gcda when the
-          # instrumented code flushes: on plugin .so unload (dlclose destructor) or
-          # on process exit (libgcov atexit). Deactivate the plugin and gracefully
-          # stop WPEFramework so those flushes happen before we search for .gcda.
-          echo "===== Flushing coverage: deactivate plugin and stop WPEFramework ====="
-          ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
-            set -uo pipefail
-            plugin_callsign="'"$PLUGIN_CALLSIGN"'"
-            curl -sS --connect-timeout 5 --max-time 10 \
-              -H "Content-Type: application/json" \
-              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.deactivate\",\"params\":{\"callsign\":\"$plugin_callsign\"}}" \
-              http://127.0.0.1:9998/jsonrpc 2>&1 || true
-            echo
-            sleep 3
-            # Graceful stop (SIGTERM) lets libgcov atexit handlers write .gcda.
-            systemctl stop WPEFramework 2>/dev/null || systemctl stop wpeframework 2>/dev/null || true
-            sleep 5
-            sync
-          ' || true
-
-          # Locate the .gcda files produced by the test run, report count and paths, then archive.
           ssh "${ssh_opts[@]}" -p "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1" '
             set -euo pipefail
-            coverage_archive="/tmp/'"$COMPONENT_SLUG"'-coverage.tar.gz"
-            echo "===== Searching for .gcda files produced during the test run ====="
-            gcda_list_file=/tmp/gcda-files.txt
-            find / -type f -name "*.gcda" 2>/dev/null > "$gcda_list_file" || true
-            gcda_count=$(grep -c "\.gcda$" "$gcda_list_file" || true)
-            echo "Number of .gcda files produced on guest: $gcda_count"
-            if [[ "$gcda_count" -gt 0 ]]; then
-              echo "Paths of .gcda files:"
-              sed "s/^/  /" "$gcda_list_file"
-              # BusyBox tar has no --parents; -T archives the listed files, stripping
-              # the leading "/" so the host can restore them at their absolute paths.
-              tar -czf "$coverage_archive" -T "$gcda_list_file"
-            else
-              echo "WARNING: no .gcda files were produced on guest" >&2
-              mkdir -p /tmp/coverage-empty
-              tar -czf "$coverage_archive" -C /tmp coverage-empty
-            fi
-          '
-          scp "${ssh_opts[@]}" -P "$QEMU_SSH_PORT" "$QEMU_SSH_USER@127.0.0.1:/tmp/${COMPONENT_SLUG}-coverage.tar.gz" "$QEMU_WORKDIR/"
+            curl -sS -f --connect-timeout 5 --max-time 10 \
+              -H "Content-Type: application/json" \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Controller.1.deactivate\",\"params\":{\"callsign\":\"'"$PLUGIN_CALLSIGN"'\"}}" \
+              http://127.0.0.1:9998/jsonrpc
+            systemctl stop WPEFramework 2>/dev/null || systemctl stop wpeframework
+            sleep 5
+            sync
 
-          # Report the .gcda files retrieved onto the host runner.
-          host_gcda_count=$(tar -tzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" | grep -c "\.gcda$" || true)
-          echo "===== .gcda files retrieved to host runner: $host_gcda_count ====="
-          tar -tzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" | grep "\.gcda$" | sed "s/^/  /" || true
+            find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
+              -type f \( -name "*.gcno" -o -name "*.gcda" \) -print \
+              2>/tmp/coverage-find-errors.log > /tmp/coverage-files.txt || {
+              cat /tmp/coverage-find-errors.log >&2
+              exit 1
+            }
+            cat /tmp/coverage-files.txt
+            grep -q "\.gcno$" /tmp/coverage-files.txt || {
+              echo "ERROR: image contains no .gcno metadata. Coverage requires metadata matching the image build." >&2
+              exit 1
+            }
+            grep -q "\.gcda$" /tmp/coverage-files.txt || {
+              echo "ERROR: image produced no .gcda data. A coverage-instrumented plugin is required." >&2
+              exit 1
+            }
+            tar -czf "/tmp/'"$COMPONENT_SLUG"'-coverage.tar.gz" -T /tmp/coverage-files.txt
+          ' 2>&1 | tee "$QEMU_WORKDIR/coverage-collection.log"
+          scp "${ssh_opts[@]}" -P "$QEMU_SSH_PORT" \
+            "$QEMU_SSH_USER@127.0.0.1:/tmp/${COMPONENT_SLUG}-coverage.tar.gz" "$QEMU_WORKDIR/"
 
       - name: Extract Coverage Data
-        if: always()
+        id: extract-coverage
+        if: always() && steps.coverage.outcome == 'success'
         run: |
           set -euo pipefail
-          # Restore .gcda at their absolute build paths so they sit beside the .gcno.
-          tar -xzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" -C / 2>/dev/null || true
+          mkdir -p "$QEMU_WORKDIR/coverage"
+          tar -xzf "$QEMU_WORKDIR/${COMPONENT_SLUG}-coverage.tar.gz" -C "$QEMU_WORKDIR/coverage"
+
       - name: Generate Coverage Report
-        if: always()
+        if: always() && steps.extract-coverage.outcome == 'success'
         run: |
           set -euo pipefail
-          # Capture the compile-time baseline so plugin translation units with
-          # no runtime hits are still present in the report.
-          lcov \
-             --capture \
-             --initial \
-             --directory "$COMPONENT_DIR" \
-             --output-file coverage_initial.info
-          lcov \
-             --capture \
-             --directory "$COMPONENT_DIR" \
-             --output-file coverage_runtime.info
-          if grep -q '^SF:' coverage_runtime.info; then
-            lcov \
-               --add-tracefile coverage_initial.info \
-               --add-tracefile coverage_runtime.info \
-               --output-file coverage.info
-          else
-            echo "WARNING: runtime coverage contains no source records; using the zero-hit baseline" >&2
-            cp coverage_initial.info coverage.info
-          fi
-          lcov \
-             --extract coverage.info \
-             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.c" \
-             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cc" \
-             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cpp" \
-             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.h" \
-             "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.hpp" \
-             --output-file coverage_plugin.info
-          lcov \
-             --remove coverage_plugin.info \
-             '/usr/*' \
-             '*/Tests/*' \
-             '*/build/*' \
-             --output-file coverage_filtered.info
-          genhtml \
-             coverage_filtered.info \
-             --output-directory coverage_html
+          lcov --capture --initial \
+            --directory "$QEMU_WORKDIR/coverage" \
+            --output-file coverage_initial.info
+          lcov --capture \
+            --directory "$QEMU_WORKDIR/coverage" \
+            --output-file coverage_runtime.info
+          lcov --add-tracefile coverage_initial.info \
+            --add-tracefile coverage_runtime.info \
+            --output-file coverage.info
+          lcov --extract coverage.info \
+            "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.c" \
+            "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cc" \
+            "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.cpp" \
+            "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.h" \
+            "*/$COMPONENT_DIR/$COVERAGE_SOURCE_DIRECTORY/*.hpp" \
+            --output-file coverage_plugin.info
+          lcov --remove coverage_plugin.info \
+            '/usr/*' '*/Tests/*' '*/build/*' \
+            --output-file coverage_filtered.info
+          # Matching sources are not downloaded; show coverage without source listings.
+          genhtml coverage_filtered.info --no-source --output-directory coverage_html
           coverage_summary="$(lcov --summary coverage_filtered.info 2>&1)"
           line_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*lines\.*: \([0-9.]*\)%.*/\1/p')"
           function_coverage="$(printf '%s\n' "$coverage_summary" | sed -n 's/.*functions\.*: \([0-9.]*\)%.*/\1/p')"
-
           [[ -n "$line_coverage" && -n "$function_coverage" ]] || {
             echo "ERROR: unable to read line and function coverage from coverage_filtered.info" >&2
             exit 1
           }
-
           echo "Required coverage: ${MIN_COVERAGE}%"
           echo "Line coverage: ${line_coverage}%"
           echo "Function coverage: ${function_coverage}%"
@@ -1014,18 +451,17 @@ jobs:
               echo "ERROR: function coverage is below the required minimum" >&2
               exit 1
             }
-      - name: Upload QEMU logs and plugin artifacts
+
+      - name: Upload QEMU logs and test coverage results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-${{ env.COMPONENT_SLUG }}-build-and-tests-${{ github.run_id }}
+          name: qemu-${{ env.COMPONENT_SLUG }}-tests-and-coverage-${{ github.run_id }}
           path: |
-            ${{ env.PLUGIN_ARTIFACT_DIRECTORY }}/**
-            ${{ env.RUNTIME_ARTIFACT_DIRECTORY }}/**
             /tmp/qemu-artifacts/*.log
             /tmp/qemu-artifacts/*.txt
             /tmp/qemu-artifacts/*.pid
-            /tmp/qemu-artifacts/serial.log
+            /tmp/qemu-artifacts/*-coverage.tar.gz
             coverage.info
             coverage_initial.info
             coverage_runtime.info
