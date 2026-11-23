@@ -7,7 +7,7 @@ on:
       
 jobs:
   test:
-    uses: rdkcentral/entservices-hdmicecsource/.github/workflows/hdmicecsource-plugin-foundation.yml@develop
+    uses: rdkcentral/entservices-hdmicecsource/.github/workflows/hdmicecsource-plugin-foundation.yml@test/RDKEMW-28707
     with:
       build_number: "57"
     secrets:
