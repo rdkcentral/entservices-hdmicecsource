@@ -4,6 +4,9 @@ permissions:
   contents: read
 
 on:
+  push:
+    branches:
+      - 'test/RDKEMW-28707'
   workflow_dispatch:
     inputs:
       build_number:
