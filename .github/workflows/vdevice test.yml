@@ -1,0 +1,15 @@
+name: Vdevice test workflow
+
+on:
+  push:
+    branches:
+      - 'test/RDKEMW-28707'
+      
+jobs:
+  test:
+    uses: rdkcentral/entservices-hdmicecsource/.github/workflows/hdmicecsource-plugin-foundation.yml@develop
+    with:
+      build_number: "57"
+    secrets:
+      RDK_PORTAL_USERNAME: ${{ secrets.RDK_PORTAL_USERNAME }}
+      RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
