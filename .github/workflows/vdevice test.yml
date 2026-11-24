@@ -8,7 +8,7 @@ on:
 jobs:
   portal-connectivity:
     name: Check portal connectivity from CI container
-    runs-on: comcast-ubuntu-latest
+    runs-on: comcast-ubuntu-next
     timeout-minutes: 5
     container:
       image: ghcr.io/rdkcentral/docker-rdk-ci:latest
