@@ -37,7 +37,7 @@ on:
 jobs:
   test-image:
     name: Test portal image and collect coverage
-    runs-on: comcast-ubuntu-next
+    runs-on: comcast-ubuntu-latest
     container:
       image: ghcr.io/rdkcentral/docker-rdk-ci:latest
     defaults:
