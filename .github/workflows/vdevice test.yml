@@ -10,6 +10,8 @@ jobs:
     uses: rdkcentral/entservices-hdmicecsource/.github/workflows/hdmicecsource-plugin-foundation.yml@test/RDKEMW-28707
     with:
       build_number: "57"
+      source_ref: "test/RDKEMW-28707"
     secrets:
       RDK_PORTAL_USERNAME: ${{ vars.RDK_PORTAL_USERNAME }}
       RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
+
