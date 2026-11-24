@@ -38,6 +38,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          curl -Iv --connect-timeout 10 https://rdkportal-e.stb.r53.xcal.tv/
           ping -c 4 -W 3 -w 15 "$PORTAL_HOST" || {
             echo "::warning::Portal ping failed. ICMP may be blocked or unavailable in the container; check the HTTPS result."
             exit 1
