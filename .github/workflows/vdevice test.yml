@@ -6,63 +6,10 @@ on:
       - 'test/RDKEMW-28707'
       
 jobs:
-  portal-connectivity:
-    name: Check portal connectivity from CI container
-    runs-on: comcast-ubuntu-next
-    timeout-minutes: 5
-    container:
-      image: ghcr.io/rdkcentral/docker-rdk-ci:latest
-    defaults:
-      run:
-        shell: bash
-    env:
-      PORTAL_HOST: rdkportal-e.stb.r53.xcal.tv
-    steps:
-      - name: Install connectivity tools
-        run: |
-          set -euo pipefail
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            iputils-ping traceroute curl ca-certificates
-
-      - name: Check portal DNS resolution
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          getent ahosts "$PORTAL_HOST" || {
-            echo "::warning::Portal DNS resolution failed."
-            exit 1
-          }
-
-      - name: Ping portal from container
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          curl -Iv --connect-timeout 10 https://rdkportal-e.stb.r53.xcal.tv/
-          ping -c 4 -W 3 -w 15 "$PORTAL_HOST" || {
-            echo "::warning::Portal ping failed. ICMP may be blocked or unavailable in the container; check the HTTPS result."
-            exit 1
-          }
-
-      - name: Trace portal HTTPS route
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          echo "TCP traceroute to $PORTAL_HOST:443 (maximum 20 hops)."
-          echo "An asterisk means no hop reply; it does not prove traffic stops at that hop."
-          timeout 45s traceroute -n -T -p 443 -m 20 -q 1 -w 1 "$PORTAL_HOST" || {
-            echo "::warning::Portal TCP traceroute failed or timed out. Network filtering or container raw-socket permissions may prevent hop discovery."
-            exit 1
-          }
-
-      - name: Check portal HTTPS connectivity
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          curl -sS --connect-timeout 10 --max-time 30 \
-            -o /dev/null \
-            -w 'Portal HTTP status: %{http_code}; remote IP: %{remote_ip}; total time: %{time_total}s\n' \
-            "https://$PORTAL_HOST/" || {
-            echo "::warning::Portal HTTPS connectivity failed. Check runner network access, firewall, proxy and certificates."
-            exit 1
-          }
+  test:
+    uses: rdkcentral/entservices-hdmicecsource/.github/workflows/hdmicecsource-plugin-foundation.yml@test/RDKEMW-28707
+    with:
+      build_number: "57"
+    secrets:
+      RDK_PORTAL_USERNAME: ${{ vars.RDK_PORTAL_USERNAME }}
+      RDK_PORTAL_TOKEN: ${{ secrets.RDK_PORTAL_TOKEN }}
